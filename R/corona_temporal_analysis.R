@@ -7,26 +7,29 @@ library(localizebase)
 
 
 
-#"https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv"
+# CONFIG
+MIN_SAMPLE_SIZE = 14
 
-data_raw <- 
-  localizebase::cache_eval(
-    keys = Sys.Date(),
-    expr = 
-      local({
-        list(
-          confirmed = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv"
-          ,deaths = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Deaths.csv"
-        ) %>% 
-          map(read_csv)
-      })
-  )
-    
-
+# GLOBALS
 MAX_DATE <- NULL
 
-data_clean <- 
+
+data <- 
   local({
+    
+    data_raw <- 
+      localizebase::cache_eval(
+        keys = Sys.Date(),
+        expr = 
+          local({
+            list(
+              confirmed = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv"
+              ,deaths = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Deaths.csv"
+            ) %>% 
+              map(read_csv)
+          })
+      )
+    
     data_tidy <- 
       data_raw$confirmed %>%
       select(-c("Lat", "Long")) %>%
@@ -36,7 +39,7 @@ data_clean <-
     
     MAX_DATE <<- max(data_tidy$date)
     
-    data_agg_and_enriched <- 
+    df_proc <- 
       data_tidy %>% 
       mutate(state = ifelse((country == "China" & state != "Hubei"),"Non-Hubei", state)) %>% 
       mutate(country_state = paste0(country, ifelse(is.na(state),"",paste0(": ",state)))) %>% # france is both country and state
@@ -56,11 +59,11 @@ data_clean <-
         r = ifelse(is.infinite(r), 0, r),
         r = ifelse(is.nan(r), NA_real_, r),
         r_lag1 = lag(r, 1)
-        ) %>% 
+      ) %>% 
       mutate(
         r_slope = r-r_lag1,
         r_slope2 = r_slope-lag(r_slope),
-             ) %>% 
+      ) %>% 
       ungroup() %>%
       group_by(country_state) %>% 
       mutate(date_peak = max(date[which.max(r)])) %>% 
@@ -75,17 +78,15 @@ data_clean <-
     #   arrange(desc(n_country_state_confirmed)) %>% 
     #   view
     
-    MIN_SAMPLE_SIZE = 14
-    
     # get popular/interesting places + IL
-    data_clean <- 
-      data_agg_and_enriched %>% 
+    df_clean <- 
+      df_proc %>% 
       filter_verbose(n_country_state_confirmed >= 1000 | country %in% "Israel") %>%  # country %in% c("Italy", "Israel", "Spain", "Korea, South", "United Kingdom") | 
       # mutate(r = ifelse(date<date_peak, NA_integer_, r)) %>%  # mask R's prior to peak
       filter_verbose(
         date >= date_peak &
-        date >= date_case100 &
-        date >= date_r1.5_post_peak) %>%
+          date >= date_case100 &
+          date >= date_r1.5_post_peak) %>%
       filter_verbose(date>=date_peak) %>%
       group_by(country_state) %>% 
       mutate(sample_size = n()) %>%
@@ -94,8 +95,15 @@ data_clean <-
       mutate(n_day = row_number()) %>% 
       ungroup() %>% 
       select(country, country_state, n_day,n_country_state_confirmed, n_country_confirmed, date, everything())
-
-         })
+    
+    return(
+      list(
+        df_proc = df_proc,
+        df_clean = df_clean
+           )
+    )
+    
+  })
 
 
 
@@ -106,20 +114,50 @@ data_clean <-
 ##### MODELING #####
 
 DATE_INDEX_COL = "n_day" # "date
-tsbl <- 
-  as_tsibble(data_clean, 
-           key = country_state, 
-           index = DATE_INDEX_COL)
+tsbl <-
+  data$df_clean %>% 
+  as_tsibble(key = country_state,
+             index = DATE_INDEX_COL)
 
 
 # Confirmed over time
-(tsbl %>% 
+
+# all time - by date
+data$df_proc %>% 
+  semi_join(data$df_clean, by = "country_state") %>% 
+    ggplot(aes(date, y = confirmed, color = country_state)) + #  need to specify only the target var
+    geom_point(alpha = 0.3) +
+    geom_smooth(se=F)+
+    ylab("confirmed cases") + 
+    xlab("date") +
+    ggtitle("# confirmed by day") 
+
+# since stable point 
+(data$df_clean %>% 
     ggplot(aes(!!rlang::sym(DATE_INDEX_COL), y = confirmed, color = country_state)) + #  need to specify only the target var
     geom_point(alpha = 0.3)+
     geom_smooth(se=F)+
     ylab("confirmed cases") + xlab("date") +
     ggtitle("# confirmed by day")) %>% 
   ggplotly()
+
+# since first confirmed
+data$df_proc %>% 
+  semi_join(data$df_clean, by = "country_state") %>% 
+  filter_verbose(confirmed>=1) %>%
+  group_by(country_state) %>% 
+  arrange(country_state, date) %>% 
+  mutate(n_day = row_number()) %>% 
+  ungroup() %>% 
+  ggplot(aes(!!rlang::sym(DATE_INDEX_COL), y = confirmed, color = country_state)) + #  need to specify only the target var
+  geom_point(alpha = 0.3)+
+  geom_smooth(se=F)+
+  ylab("total confirmed cases") + 
+  xlab("days (since first confirmed case)") +
+  ylim(0,7e4)+
+  ggtitle("total confirmed cases")
+
+
 
 # log(confirmed) over time
 (tsbl %>% 
@@ -135,10 +173,10 @@ tsbl <-
   tsbl %>% 
     ggplot(aes(!!rlang::sym(DATE_INDEX_COL), r, color = country_state)) + #  need to specify only the target var
     geom_point(alpha = 0.3) +
-    geom_smooth(se=F) +
-    # geom_smooth(se=F, method ="gam", formula = y ~ s(x, bs = "cs",k=4)) +
+    # geom_smooth(se=F) +
+    geom_smooth(se=F, method ="gam", formula = y ~ s(x, bs = "cs",k=4)) +
     facet_wrap(vars(country_state), scales = "free_x") +
-    ylab("R") +
+    ylab("R - total cases in day i / total in day i-1") +
     ylim(1,1.75)+
     xlab("date") +
     ggtitle("R - total till day i / total till day i-1 ")
