@@ -1,30 +1,27 @@
 require(pacman)
 p_load(tidyverse)
 p_load(magrittr)
-p_load(tidyverts)
 p_load(fpp3)
 p_load(plotly)
 library(localizebase)
 
 
-# To-Do
-ALIGN_R_VAL = 1.3 
 
 #"https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv"
 
 data_raw <- 
-  local({
-    list(
-      confirmed = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv"
-      ,deaths = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Deaths.csv"
-    ) %>% 
-      map(read_csv)
-  })
-
-
-
-# data_raw <- 
-#   read_csv("/Users/alik/work/corona/data/time_series_19-covid-Confirmed.csv") 
+  localizebase::cache_eval(
+    keys = Sys.Date(),
+    expr = 
+      local({
+        list(
+          confirmed = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv"
+          ,deaths = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Deaths.csv"
+        ) %>% 
+          map(read_csv)
+      })
+  )
+    
 
 MAX_DATE <- NULL
 
@@ -109,21 +106,11 @@ data_clean <-
 ##### MODELING #####
 
 DATE_INDEX_COL = "n_day" # "date
-
 tsbl <- 
   as_tsibble(data_clean, 
            key = country_state, 
            index = DATE_INDEX_COL)
 
-# geo_mean <- function(x) exp(mean(log(x)))
-# tsts_enriched_enriched <-
-#   ts %>%
-#   mutate(
-#     # confirmed_7MA =
-#     #   slide_dbl(confirmed, mean, .size = 7, .align = "right"),
-# 
-#     r = confirmed/lag(confirmed)
-# )
 
 # Confirmed over time
 (tsbl %>% 
