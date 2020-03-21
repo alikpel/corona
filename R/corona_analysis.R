@@ -9,6 +9,20 @@ library(localizebase)
 
 # CONFIG
 MIN_SAMPLE_SIZE = 14
+COUNTRY_STATE_FOR_MODELING <- 
+  c("China: Hubei",
+    "China: Non-Hubei",
+    "France: France",
+    "Germany",
+    "Iran",
+    "Italy",
+    "Spain",
+    "Korea, South",
+    "Netherlands: Netherlands",
+    "Norway",
+    "Sweden",
+    "Switzerland",
+    "United Kingdom: United Kingdom")
 
 # GLOBALS
 MAX_DATE <- NULL
@@ -54,13 +68,13 @@ data <-
       group_by(country_state) %>%
       arrange(date) %>%
       mutate(
-        confirmed_lag1 = lag(confirmed),
-        r = confirmed/confirmed_lag1,
+        new_cases = confirmed-lag(confirmed),
+        r = confirmed/lag(confirmed),
         r = ifelse(is.infinite(r), 0, r),
         r = ifelse(is.nan(r), NA_real_, r),
-        r_lag1 = lag(r, 1)
       ) %>% 
       mutate(
+        r_lag1 = lag(r, 1),
         r_slope = r-r_lag1,
         r_slope2 = r_slope-lag(r_slope),
       ) %>% 
@@ -81,12 +95,14 @@ data <-
     # get popular/interesting places + IL
     df_clean <- 
       df_proc %>% 
-      filter_verbose(n_country_state_confirmed >= 1000 | country %in% "Israel") %>%  # country %in% c("Italy", "Israel", "Spain", "Korea, South", "United Kingdom") | 
+      filter_verbose(n_country_state_confirmed >= 1000 | country == "Israel") %>%  # country %in% c("Italy", "Israel", "Spain", "Korea, South", "United Kingdom") | 
       # mutate(r = ifelse(date<date_peak, NA_integer_, r)) %>%  # mask R's prior to peak
       filter_verbose(
-        date >= date_peak &
+        country == "Israel" |
+          (date >= date_peak &
           date >= date_case100 &
-          date >= date_r1.5_post_peak) %>%
+          date >= date_r1.5_post_peak)
+        ) %>%
       filter_verbose(date>=date_peak) %>%
       group_by(country_state) %>% 
       mutate(sample_size = n()) %>%
@@ -122,115 +138,6 @@ tsbl <-
 
 # Confirmed over time
 
-# all time - by date
-data$df_proc %>% 
-  semi_join(data$df_clean, by = "country_state") %>% 
-    ggplot(aes(date, y = confirmed, color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3) +
-    geom_smooth(se=F)+
-    ylab("confirmed cases") + 
-    xlab("date") +
-    ggtitle("# confirmed by day") 
-
-# since stable point 
-(data$df_clean %>% 
-    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), y = confirmed, color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3)+
-    geom_smooth(se=F)+
-    ylab("confirmed cases") + xlab("date") +
-    ggtitle("# confirmed by day")) %>% 
-  ggplotly()
-
-# since first confirmed
-data$df_proc %>% 
-  semi_join(data$df_clean, by = "country_state") %>% 
-  filter_verbose(confirmed>=1) %>%
-  group_by(country_state) %>% 
-  arrange(country_state, date) %>% 
-  mutate(n_day = row_number()) %>% 
-  ungroup() %>% 
-  ggplot(aes(!!rlang::sym(DATE_INDEX_COL), y = confirmed, color = country_state)) + #  need to specify only the target var
-  geom_point(alpha = 0.3)+
-  geom_smooth(se=F)+
-  ylab("total confirmed cases") + 
-  xlab("days (since first confirmed case)") +
-  ylim(0,7e4)+
-  ggtitle("total confirmed cases")
-
-
-
-# log(confirmed) over time
-(tsbl %>% 
-    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), y=log(confirmed), color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3)+
-    geom_smooth(se=F)+
-    ylab("confirmed cases") + xlab("date") +
-    ggtitle("# confirmed by day")) %>% 
-  ggplotly()
-
-# R vs time ylim1,2   r - total confirmed cases till in day i/ day i-1
-(
-  tsbl %>% 
-    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), r, color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3) +
-    # geom_smooth(se=F) +
-    geom_smooth(se=F, method ="gam", formula = y ~ s(x, bs = "cs",k=4)) +
-    facet_wrap(vars(country_state), scales = "free_x") +
-    ylab("R - total cases in day i / total in day i-1") +
-    ylim(1,1.75)+
-    xlab("date") +
-    ggtitle("R - total till day i / total till day i-1 ")
-)
-%>% 
-  ggplotly()
-
-
-
-
-
-
-(
-  tsbl %>% 
-    # filter(country %in% c("Italy","Israel")) %>% 
-    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), r, color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3) +
-    geom_smooth(se=F)+
-    ylab("R") + 
-    xlab("day") +
-    ggtitle("R by day")
-)
-%>% 
-  ggplotly()
-
-
-
-
-# R slope vs time
-(
-  tsbl %>% 
-    ggplot(aes(date, y=r_slope)) + #  need to specify only the target var
-    geom_point(alpha = 0.3) +
-    geom_smooth(se=F, formula =  y ~ x) +
-    facet_wrap(vars(country_state), scales = "free_y") +
-    xlim(-1,1)+
-    ylab("R slope") 
-    # xlab("date") +
-    # ggtitle(paste0(country_state,"R by day:"))
-)
-%>% 
-  ggplotly()
-
-# log R
-(tsbl %>% 
-    ggplot(aes(date, log(r), color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3) +
-    geom_smooth(se = F)+
-    ylab("log(R)") + 
-    xlab("date") +
-    ggtitle("log(R) by day"))%>% 
-  ggplotly()
-
-
 
 
 #### MODELING 
@@ -242,7 +149,7 @@ FORECASTING_DAYS = 7
 # trainset - prior to 2007
 ts_train <- 
   tsbl %>% 
-  filter(date <= MAX_DATE - FORECASTING_DAYS)
+  filter(date <= MAX_DATE - 0)
 
 fitted <- 
   ts_train %>% 
@@ -389,18 +296,143 @@ fitted_models %>%
 
 
 
-# tsbl %>% 
-#   # filter(country_state =="Austria") %>% 
-#   autoplot(confirmed) +
-#   geom_line(data = fit)
 
 
 
-  # filter(country_state =="Austria") %>% 
-  # tsbl %>% 
-  # ggplot(aes(x= date, y= confirmed, color = country_state))+
-  # geom_line() +
-  # geom_line(data = fit)+
-  #   facet_wrap(confirmed~.)
+# all time - by date
+data$df_proc %>% 
+  semi_join(data$df_clean, by = "country_state") %>% 
+  ggplot(aes(date, y = confirmed, color = country_state)) + #  need to specify only the target var
+  geom_point(alpha = 0.3) +
+  geom_smooth(se=F,method = "gam")+
+  ggtitle("Total confirmed COVID-19 cases by country-state") +
+  ylab("total confirmed cases") + 
+  xlab("date")
+
+# since stable point 
+(
+  data$df_clean %>% 
+    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), y = confirmed, color = country_state)) + #  need to specify only the target var
+    geom_point(alpha = 0.3)+
+    geom_smooth(se=F,method = "gam")+
+    ggtitle("Total confirmed COVID-19 cases by country-state") +
+    ylab("total confirmed cases") +
+     xlab("day")
+ ) %>%  ggplotly()
+
+# since first confirmed
+(
+  data$df_proc %>% 
+    semi_join(data$df_clean, by = "country_state") %>% 
+    filter_verbose(confirmed>=1) %>%
+    group_by(country_state) %>% 
+    arrange(country_state, date) %>% 
+    mutate(n_day = row_number()) %>% 
+    ungroup() %>% 
+    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), y = log(confirmed), color = country_state)) + #  need to specify only the target var
+    geom_point(alpha = 0.3)+
+    geom_smooth(se=F)+
+    ylab("total confirmed cases") + 
+    xlab("days (since first confirmed case)") +
+    # ylim(0,7e4)+
+    ggtitle("total confirmed cases")
+) %>% ggplotly()
+
+
+
+
+# new cases since confirmed cases > 30
+(
+  data$df_proc %>% 
+    semi_join(data$df_clean, by = "country_state") %>% 
+    filter_verbose(confirmed>=30) %>%
+    group_by(country_state) %>%
+    arrange(country_state, date) %>%
+    mutate(n_day = row_number(),
+           latest_r = r[which.max(date)]
+           ) %>%
+    ungroup() %>%
+    ggplot(aes(n_day, y = new_cases, color = country_state)) + #  need to specify only the target var
+    geom_bar(stat="identity") +
+    geom_smooth(se=F, method ="gam") +
+    facet_wrap(vars(country_state), scales = "free") +
+    ggtitle("new case by day") +
+    ylab("new cases") + 
+    xlab("time") 
+    # ylim(0,7e4)+
+) %>% ggplotly()
+
+
+
+
+
+# R by date
+(
+  data$df_proc %>% 
+    semi_join(data$df_clean, by = "country_state") %>% 
+    # filter_verbose(confirmed>=1) %>%
+    group_by(country_state) %>% 
+    arrange(country_state, date) %>% 
+    mutate(n_day = row_number()) %>% 
+    ungroup() %>% 
+    ggplot(aes(date, r, color = country_state)) + #  need to specify only the target var
+    geom_point(alpha = 0.3) +
+    # geom_smooth(se=F) +
+    geom_smooth(se=F, method ="gam", formula = y ~ s(x, bs = "cs",k=4)) +
+    facet_wrap(vars(country_state), scales = "free_x") +
+    ggtitle("daily growth rates R (R = total cases in day i / total cases in day i-1)", 
+            subtitle = "if R = 1 ==> NO NEW CASES")+
+    ylab("R") +
+    ylim(1,1.75)+
+    xlab("date") 
+) %>% 
+  ggplotly()
+
+
+
+
+# R since day 0
+(
+  tsbl %>% 
+    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), r, color = country_state)) + #  need to specify only the target var
+    geom_point(alpha = 0.3) +
+    # geom_smooth(se=F) +
+    geom_smooth(se=F, method ="gam", formula = y ~ s(x, bs = "cs",k=4)) +
+    facet_wrap(vars(country_state), scales = "free_x") +
+    ggtitle("growth rates R (R = total cases in day i / total cases in day i-1)")+
+    ylab("R") +
+    ylim(1,1.75)+
+    xlab("date") 
+) %>% 
+  ggplotly()
+
+
+
+(
+  tsbl %>% 
+    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), r, color = country_state)) + #  need to specify only the target var
+    geom_point(alpha = 0.3) +
+    geom_smooth(se=F)+
+    ylab("R") + 
+    xlab("day") +
+    ggtitle("R by day")
+)
+%>% 
+  ggplotly()
+
+
+
+
+
+# log R
+(tsbl %>% 
+    ggplot(aes(date, log(r), color = country_state)) + #  need to specify only the target var
+    geom_point(alpha = 0.3) +
+    geom_smooth(se = F)+
+    ylab("log(R)") + 
+    xlab("date") +
+    ggtitle("log(R) by day"))%>% 
+  ggplotly()
+
 
 
