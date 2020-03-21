@@ -1,11 +1,26 @@
 ---
 title: "corona_analysis"
-output: 
-  html_document:
-    keep_md: true
+
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=here::here(out_dir,"index.html")
+ )
+ })
+    
 ---
 
 ```{r setup, include=FALSE}
+
+# file.path(here::dr_here(), out_dir, 'index.html'))})
+# file.path(here::dr_here(out_dir, 'index.html'), "docs", 'index.html')
+# 
+# here::dr_here()
+
+# output: 
+#   html_document:
+#     keep_md: true
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
