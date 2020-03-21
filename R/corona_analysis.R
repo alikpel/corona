@@ -352,14 +352,15 @@ data$df_proc %>%
            latest_r = r[which.max(date)]
            ) %>%
     ungroup() %>%
+    arrange(latest_r) %>% 
     ggplot(aes(n_day, y = new_cases, color = country_state)) + #  need to specify only the target var
     geom_bar(stat="identity") +
     geom_smooth(se=F, method ="gam") +
+    # ylim(0,5e3)+
     facet_wrap(vars(country_state), scales = "free") +
-    ggtitle("new case by day") +
+    ggtitle("new cases by day") +
     ylab("new cases") + 
-    xlab("time") 
-    # ylim(0,7e4)+
+    xlab("days") 
 ) %>% ggplotly()
 
 
@@ -395,7 +396,7 @@ data$df_proc %>%
 (
   tsbl %>% 
     ggplot(aes(!!rlang::sym(DATE_INDEX_COL), r, color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3) +
+    geom_point(alpha = 0.5) +
     # geom_smooth(se=F) +
     geom_smooth(se=F, method ="gam", formula = y ~ s(x, bs = "cs",k=4)) +
     facet_wrap(vars(country_state), scales = "free_x") +
