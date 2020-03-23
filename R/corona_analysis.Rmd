@@ -50,7 +50,8 @@ data_sources <-
 
 MIN_SAMPLE_SIZE = 14
 COUNTRY_STATE_FOR_MODELING <- 
-  c("China: Hubei",
+  c(
+    "China: Hubei",
     "China: Non-Hubei",
     "France: France",
     "Germany",
@@ -62,7 +63,8 @@ COUNTRY_STATE_FOR_MODELING <-
     "Norway",
     "Sweden",
     "Switzerland",
-    "United Kingdom: United Kingdom")
+    "United Kingdom: United Kingdom",
+    "Israel")
 
 FORECASTING_DAYS = 7
 ```
@@ -108,11 +110,14 @@ data <-
         r = ifelse(is.infinite(r) | is.nan(r) | is.na(r), 1, r)
         # r = ifelse(is.nan(r), NA_real_, r),
       ) %>% 
-      mutate(mean_new_cases = slider::slide_dbl(new_cases, mean, .before=3)) %>% 
+      mutate(mean_new_cases = slider::slide_dbl(new_cases, mean, .before=3),
+             mean_r = slider::slide_dbl(r, mean, .before=1, .after=1)) %>% 
       mutate(
         date_case100 = min(date[confirmed>=100]),
-        date_peak = max(date[which.max(r)]),
-        date0 = min(date[date > date_peak + 7 & date > date_case100]),
+        date_peak = min(date[which.max(mean_r)]),
+        date0 = min(date[date >= date_peak 
+                         #& date >= date_case100
+                         ]),
         dateEnd = min(date[date > date0 & mean_new_cases == 0 ]),
         n_row = row_number(),
         min_nday = min(n_row[date == date0]),
@@ -129,11 +134,11 @@ data <-
     df_clean <- 
       df_proc %>% 
       filter_verbose(
-        (n_country_state_confirmed >= 1000 | country == "Israel")
-        ) %>% 
-      group_by(country_state) %>% 
-      filter(n()>=MIN_SAMPLE_SIZE) %>% 
-      ungroup() %>% 
+        # (n_country_state_confirmed >= 1000 | 
+           country %in% COUNTRY_STATE_FOR_MODELING) %>% 
+      # group_by(country_state) %>% 
+      # filter(n()>=MIN_SAMPLE_SIZE) %>% 
+      # ungroup() %>% 
       select(country, country_state, n_day, n_country_state_confirmed, date, everything())
     
     res <- 
@@ -169,7 +174,7 @@ model_data <-
     
     ETS_model_fitted <- 
       tsbl %>% 
-      filter(country=="Austria") %>% 
+      # filter(country=="Austria") %>% 
       model(ETS(r ~ error("A") + trend("A") + season("N"),  opt_crit = "mae")) 
     # !!rlang::sym(TARGET_VAR)
     
@@ -195,10 +200,10 @@ model_data <-
      model_data <- 
        fitted_data %>% 
        full_join(data$df_clean) %>% 
-       mutate(prc_change_in_total_cases = r_model - 1)
+       mutate(prc_change_in_total_cases = 100*(r_model - 1))
   })
 
-data$df_proc %>% 
+data$df_clean %>% 
   ggplot(aes(x=n_day,y=r, color = country_state)) +
   geom_point(alpha = 0.2) +
   geom_smooth()+
@@ -209,33 +214,46 @@ data$df_proc %>%
 
 
 
-# model - daily % change (r = 1 - number total cases stays the same; r > 1 proportional to growth rate, e.g. if in day i r=1.2 it means that the number of total patients grew by 20% relative to the day i - 1 ). the dashed line show extrapulation 7 days forward.
-# Day 0 - the first day since the peak in r when total number of patients > 100 and 
-model_data %>% 
-  filter(n_day>=0, fit_type=="interpolation") %>% 
-  ggplot(aes(x=n_day,y=prc_change_in_total_cases, color = country_state)) +
-  geom_point(alpha = 0.2) +
-  geom_line() +
-  geom_line(aes(y=prc_change_in_total_cases), 
-            data = model_data %>% filter(n_day>=0, fit_type=="extrapolation"),             
-            linetype = "dashed") +
-  ggtitle("% change in total cases by day",subtitle = "Day 0 - is the first day with after the data is stabilized") +
-  ylim(0,.6) +
-  ylab("% change in total cases") +
-  facet_wrap(vars(country_state), scales = "free_x") 
+```
 
+
+# daily % change (r = 1 - number total cases stays the same; r > 1 proportional to growth rate, e.g. if in day i r=1.2 it means that the number of total patients grew by 20% relative to the day i - 1 ). the dashed line show extrapulation 7 days forward.
+# Day 0 - the first day since the peak in r when total number of patients > 100 and 
+
+```{r}
+# daily percent change in *total* confirmed cases
+local({
+  
+  data_for_plot <- 
+    model_data %>% 
+    group_by(country_state) %>% 
+    mutate(n_day = n_day - min(n_day)) %>% 
+    ungroup()
+  
+  plot <- 
+    ggplot(data = data_for_plot,
+           aes(x = n_day,y = 100*(r-1), color = country_state)) +
+    geom_point(alpha = 0.4, color = "black") +
+    geom_line(
+      data = data_for_plot %>% filter(fit_type=="interpolation"),
+      aes(x=n_day,y=prc_change_in_total_cases, color = country_state),
+      alpha = 0.8, size = 1.0) +
+    geom_line(
+      data = data_for_plot %>% filter(fit_type == "extrapolation"),
+      aes(x = n_day,y = prc_change_in_total_cases, color = country_state),
+      linetype = "dashed") +
+    ggtitle("% change in total cases") +
+    ylim(0, 70) +
+    ylab("% change in total cases") +
+    facet_wrap(~country_state, scales = "free") 
+  
+  suppressWarnings(print(plot))
+})
 ```
 
 
 
 ```{r}
-# forecasting for each country
-# (
-#   tsbl %>% 
-#   autoplot(r) +
-#   geom_line(data = augment(ETS_fitted), linetype = "dashed")
-# ) %>% ggplotly()
-
 
 # for each <geo,time> calc 7 days fwd r coefs (based on fitted Rs)  
 ts_forecast <- 
