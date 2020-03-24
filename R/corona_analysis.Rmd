@@ -1,11 +1,15 @@
 ---
 title: "corona_analysis"
+output:
+  html_document:
+    fig_width: 6
+    fig_height: 4
 
 knit: (function(input_file, encoding) {
   out_dir <- 'docs';
-  rmarkdown::render(input_file,
- encoding=encoding,
- output_file=here::here(out_dir,"index.html")
+  rmarkdown::render(input_file, 
+  encoding=encoding,
+  output_file=here::here(out_dir,"index.html")
  )
  })
     
@@ -14,6 +18,7 @@ knit: (function(input_file, encoding) {
 
 
 ```{r setup, include=FALSE}
+
 
 # publish rmarkdown to github pages: 
 #https://resources.github.com/whitepapers/github-and-rstudio/
@@ -26,7 +31,15 @@ knit: (function(input_file, encoding) {
 # output: 
 #   html_document:
 #     keep_md: true
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  collapse = TRUE,
+  comment = "#>",
+  rownames.print = 50,
+  cols.print = 20,
+   fig_width =  6,
+  fig_height = 4)
+
 ```
 
 ```{r, echo=FALSE}
@@ -322,7 +335,7 @@ local({
 
 
 # forecast scenarios total number of cases for Israel based on Israel itself and other countries such as S.Korea, Italy, Iran
-```{r}
+```{r, fig.width=4, fig.height=2}
 df_latest_day_IL <- 
   model_data %>% 
   filter(country_state == "Israel", fit_type == "interpolation") %>% 
@@ -390,9 +403,10 @@ local({
       ) +
     geom_vline(data = ts_forecast_with_il %>% filter(country_state != "Israel"), aes(xintercept = dateStart))+
     geom_vline(data = ts_forecast_with_il %>% filter(country_state != "Israel"), aes(xintercept = dateEnd))+
-    ggtitle("Date range selected for IL forecasting") +
+    ggtitle("date range selected for forecasting of IL by ref. country ") +
     ylim(0, 70) +
     ylab("% change in total cases") +
+    # scale_x_date(date_breaks = "3 weeks", date_labels =  "%d-%b") +
     facet_wrap(~country_state, scales = "free") 
   
   suppressWarnings(print(plot))
@@ -424,8 +438,7 @@ local({
     # ) +
     geom_line( # data used for IL prediction
       data = ts_forecast_with_il, #%>% filter(country_state != "Israel"),
-      aes(x = date_il, y = r_mode, color = country_state),
-      show.legend = FALSE,
+      aes(x = date_il, y = prc_change_in_total_cases_model, color = country_state),
       linetype = "dashed",
       size = 1
     ) +
