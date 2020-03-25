@@ -106,8 +106,8 @@ data <-
       pivot_longer(-c("Province/State", "Country/Region"), "date") %>%
       set_colnames(c("state","country", "date", "confirmed")) %>%
       filter(confirmed>=which.min(confirmed>=1)) %>% 
-      mutate(date=as.Date(date, "%m/%d/%y")) %>% 
-      filter(date<="2020-03-22") #debug
+      mutate(date=as.Date(date, "%m/%d/%y")) 
+      # filter(date<="2020-03-22") #debug
     
     df_proc <- 
       data_tidy %>% 
@@ -225,28 +225,31 @@ model_data <-
          date_latest = date[which.max(date)], #only interpulated data has dates after the join
          n_day_latest = max(n_day[which.max(date)]),
          confirmed_latest = max(confirmed[which.max(date)]),
+         # confirmed_first = min(confirmed[which.min(date)]),
          date = date_latest + days(n_day-n_day_latest)
          ) %>% # add date to extrapolated values
-       ungroup() %>% 
+       ungroup() %>%
        # calc confirmed case by model r for the extrapolated entries
        (function(data){
-         extrapolation <- 
-           data %>% 
-           filter(fit_type == "extrapolation") %>% 
-           group_by(country_state) %>% 
-           arrange(date) %>% 
-           mutate(confirmed = confirmed_latest,
+         extrapolation <-
+           data %>%
+           filter(fit_type == "extrapolation") %>%
+           group_by(country_state) %>%
+           arrange(date) %>%
+           mutate(
+             #confirmed = confirmed_latest,
                   confirmed_model = # calc confirmed cases by r_model
                     Reduce(init = max(confirmed_latest),
-                           x = r_model, #lead(r_model),
+                           x = lead(r_model), #lead(r_model),
                            f = prod, 
-                           accumulate = T)[-1],
-                  confirmed = NA_integer_) %>% 
-           ungroup()
-         data %>% 
-           filter(fit_type == "interpolation") %>% 
+                           accumulate = T)[-1]
+                  # confirmed = NA_integer_
+                  ) %>% 
+           ungroup() 
+         data %>%
+           filter(fit_type == "interpolation") %>%
            bind_rows(extrapolation)
-       }) %>% 
+        }) %>% 
        select(
          country,
          country_state, 
@@ -258,13 +261,7 @@ model_data <-
   })
 
 
-# ifelse(fit_type == "interpolation", 
-#                             date,
-                            
-                #             lag(date,1)+ n_day
-                # Reduce(init = max(confirmed_latest),
-                #        x = lead(r_model),
-                #        f = prod, accumulate = T) %>% head(-1)) %>% 
+
 
 ```
 
@@ -338,12 +335,13 @@ local({
 ```{r, fig.width=4, fig.height=2}
 df_latest_day_IL <- 
   model_data %>% 
-  filter(country_state == "Israel", fit_type == "interpolation") %>% 
-  top_n(wt = date, n=1)
+  filter(country_state == "Israel", 
+         fit_type == "interpolation") %>% 
+  top_n(wt = date, n = 1)
 
 print(glue("Israel {df_latest_day_IL$date}: r_model {df_latest_day_IL $r_model}; confirmed cases: {df_latest_day_IL$confirmed} "))
 
-# for each <geo,time> calc 7 days fwd r_model 
+# generate forecast for IL based on each countrty (calc 7 days fwd r_model)
 ts_forecast <- 
   model_data %>% 
   filter(country_state != "Israel") %>% 
@@ -351,12 +349,13 @@ ts_forecast <-
   group_by(country_state) %>% 
   arrange(date) %>% 
   mutate(
-    abs_diff = abs(r_model-df_latest_day_IL$r_model),
+    abs_diff = abs(r_model - df_latest_day_IL$r_model),
     min_diff_date = date[which.min(abs_diff)],
     dateStart = min_diff_date,  #note that this is "today" not a forecasted day
     dateEnd = dateStart + FORECASTING_DAYS) %>% 
   filter(date >= dateStart, date <= dateEnd) %>% 
-  filter(n() == FORECASTING_DAYS+1) %>% 
+  filter(abs_diff<=0.1) %>% 
+  filter(n() == FORECASTING_DAYS + 1) %>% 
    mutate( # fill mising dates
     date_il = df_latest_day_IL$date + lubridate::days(0:7),
     confirmed_forecast_isr = # predict IL by other cointries
@@ -364,6 +363,8 @@ ts_forecast <-
              x = lead(r_model), 
              f = prod, accumulate = T) %>% head(-1)
     ) %>% 
+  # mutate(r_model_il = confirmed_forecast_isr/lag(confirmed_forecast_isr),
+  #        prc_change_in_total_cases_model_il = 100*(r_model_il-1)) %>%  # recalc according to the confirmed forecast_isr
   ungroup() %>% 
   arrange(country_state, date) %>% 
   select(country_state, date, dateStart, dateEnd,
@@ -371,7 +372,7 @@ ts_forecast <-
 
 ts_forecast_with_il <- 
   ts_forecast %>% 
-  select(country_state, date, dateStart, dateEnd, date_il, prc_change_in_total_cases_model, confirmed_forecast_isr) %>% 
+  # select(country_state, date, dateStart, dateEnd, date_il, prc_change_in_total_cases_model, confirmed_forecast_isr) %>% 
   bind_rows(model_data %>% 
               filter(country_state == "Israel") %>% 
               select(country_state, 
@@ -380,15 +381,17 @@ ts_forecast_with_il <-
                      prc_change_in_total_cases_model,
                      confirmed_forecast_isr = confirmed_model)
   ) %>% 
-  select(country_state, date,dateStart, dateEnd, date_il, prc_change_in_total_cases_model, confirmed_forecast_isr)
+  select(country_state, date,dateStart, dateEnd, prc_change_in_total_cases_model, 
+         date_il, confirmed_forecast_isr)
+         #,r_model_il, prc_change_in_total_cases_model_il)
 
 
 
 # layers: (1) regions raw data points (2) interpulation of raw points + (3) extrapulation (dashed line) + (4) fat lines for date-interval (7 days) used to predict IL
 local({
   plot <- 
-    ggplot(model_data %>% 
-             filter(country_state != "Israel",fit_type=="interpolation"),
+    ggplot(model_data %>% semi_join(ts_forecast_with_il, "country_state") %>% 
+             filter(country_state != "Israel",fit_type == "interpolation"),
            aes(x = date,y = prc_change_in_total_cases_model, color = country_state),
            show.legend = FALSE) +
     geom_point(alpha = 0.1, color = "black") + # raw data
@@ -396,18 +399,56 @@ local({
       show.legend = FALSE,
       alpha = 0.5, size = 0.9) +
     geom_line( #forecast of raw
-      data = model_data %>% 
+      data = model_data %>% semi_join(ts_forecast_with_il, "country_state") %>% 
         filter(country_state != "Israel", fit_type == "extrapolation"),
       show.legend = FALSE,
       linetype = "dashed"
       ) +
-    geom_vline(data = ts_forecast_with_il %>% filter(country_state != "Israel"), aes(xintercept = dateStart))+
-    geom_vline(data = ts_forecast_with_il %>% filter(country_state != "Israel"), aes(xintercept = dateEnd))+
+    geom_vline(data = ts_forecast_with_il %>% filter(country_state != "Israel"), 
+               aes(xintercept = dateStart))+
+    geom_vline(data = ts_forecast_with_il %>% filter(country_state != "Israel"), 
+               aes(xintercept = dateEnd))+
     ggtitle("date range selected for forecasting of IL by ref. country ") +
     ylim(0, 70) +
     ylab("% change in total cases") +
     # scale_x_date(date_breaks = "3 weeks", date_labels =  "%d-%b") +
     facet_wrap(~country_state, scales = "free") 
+  
+  suppressWarnings(print(plot))
+})
+```
+
+
+# forecast IL total cases over time by ref. regions
+```{r}
+
+local({
+
+  plot <-  
+    ggplot(
+      data = 
+        model_data %>% 
+        filter(country_state == "Israel", fit_type == "interpolation"),
+      mapping = aes(x = date, y = confirmed, color = country_state),
+      show.legend = FALSE) +
+    geom_point(alpha = 0.3, 
+               color = "black") + # raw data
+    geom_smooth(se=F, method = "gam") +
+    geom_line(# smooting of raw data
+      data = model_data %>% 
+                 filter(country_state == "Israel", fit_type == "extrapolation"),
+      mapping = aes(x = date, y = confirmed_model),
+       alpha = 0.5, size = 0.9,
+      linetype = "dashed"
+      )  +
+    geom_line(
+      data = ts_forecast_with_il, #%>% filter(country_state != "Israel"),
+      aes(x = date_il, y = confirmed_forecast_isr, color = country_state),
+      linetype = "dashed",
+      size = 1
+    ) +
+    ggtitle("Israel - total confirmed cases forecasting 7 days fwd by ref. countries") +
+    ylab("total confirmed cases") 
   
   suppressWarnings(print(plot))
 })
@@ -422,28 +463,22 @@ local({
   
   plot <- 
     ggplot(model_data %>% 
-             filter(country_state == "Israel", fit_type=="interpolation"),
+             filter(country_state == "Israel", fit_type == "interpolation"),
            aes(x = date,y = prc_change_in_total_cases_model),
            show.legend = FALSE) +
-    geom_point(alpha = 0.1, color = "black") + # raw data
     geom_line( # smooting of raw data
       show.legend = FALSE,
       alpha = 0.5, size = 0.9) +
-    # geom_line( #forecast of raw
-    #   data = model_data %>% 
-    #     filter(country_state == "Israel", fit_type == "extrapolation"),
-    #   aes(x = date,y = prc_change_in_total_cases_model),
-    #   show.legend = FALSE,
-    #   linetype = "dashed"
-    # ) +
+    geom_point(data = model_data %>% filter(country_state == "Israel", fit_type == "interpolation"),
+              alpha = 0.3, color = "black") + # raw data
     geom_line( # data used for IL prediction
       data = ts_forecast_with_il, #%>% filter(country_state != "Israel"),
       aes(x = date_il, y = prc_change_in_total_cases_model, color = country_state),
       linetype = "dashed",
       size = 1
     ) +
-    ggtitle("Date range selected for IL forecasting") +
-    ylim(0, 70) +
+    ggtitle("Israel - forecasting of daily change in *total confirmed cases* by ref. countries") +
+    ylim(0, 100) +
     ylab("% change in total cases") 
   
   suppressWarnings(print(plot))
