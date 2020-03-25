@@ -168,9 +168,9 @@ glue::glue("date range [{min(data$df_proc$date)} - {max(data$df_proc$date)}]")
 ```
 
 
-# daily percent change in total confirmed cases:  
-# (1) trend extrapolation for next 7 days for top countries, and
-# (2) modeling various scenarios for Israel for the next 7 days (e.g. if its confirmed cases dynamic will be similar to Iran or S.Korea).
+## daily percent change in total confirmed cases:  
+## (1) trend extrapolation for next 7 days for top countries, and
+## (2) modeling various scenarios for Israel for the next 7 days (e.g. if its confirmed cases dynamic will be similar to Iran or S.Korea).
 ```{r }
 # fit exponentinal smoothing model for region
 model_data <- 
@@ -267,7 +267,7 @@ model_data <-
 
 
 # Total confirmed cases by day for regions of interest
-```{r}
+```{r, fig.width=10, fig.height=8}
 local({
   
   data_for_plot <- 
@@ -292,10 +292,10 @@ local({
 
 
 
-# % change in total cases by day 
-## (if % change = 20% in a given day ==>  total patients grew by 20% relative to the previous day ).  
-## the dashed line show extrapulation 7 days forward.
-```{r}
+## % change in total cases by day 
+### (if % change = 20% in a given day ==>  total patients grew by 20% relative to the previous day ).  
+### the dashed line show extrapulation 7 days forward.
+```{r, fig.width=10, fig.height=8}
 # daily percent change in *total* confirmed cases
 local({
   
@@ -332,7 +332,7 @@ local({
 
 
 # forecast scenarios total number of cases for Israel based on Israel itself and other countries such as S.Korea, Italy, Iran
-```{r, fig.width=4, fig.height=2}
+```{r, fig.width=8, fig.height=3}
 df_latest_day_IL <- 
   model_data %>% 
   filter(country_state == "Israel", 
@@ -408,7 +408,7 @@ local({
                aes(xintercept = dateStart))+
     geom_vline(data = ts_forecast_with_il %>% filter(country_state != "Israel"), 
                aes(xintercept = dateEnd))+
-    ggtitle("date range selected for forecasting of IL by ref. country ") +
+    ggtitle("date range selected for Israel forecasting") +
     ylim(0, 70) +
     ylab("% change in total cases") +
     # scale_x_date(date_breaks = "3 weeks", date_labels =  "%d-%b") +
@@ -483,219 +483,6 @@ local({
   
   suppressWarnings(print(plot))
 })
-```
-
-
-
- 
-  ```{r}
-  
-
-# forecast_by_country_state <- 
-#   unique(tsbl$country_state) %>% 
-#   purrr::set_names() %>% 
-#   map(function(country_state){
-#     data_ts <- tsbl %>% filter(country_state == !!country_state)
-#     # data_model <- fit %>% filter(country_state == !!country_state)
-#     
-#     data_ts %>% 
-#       autoplot(r) +
-#       geom_line(data = augment(fit),linetype = "dashed") +
-#       ggtitle(country_state)
-#   }
-#   )
-
-
-
-# fitted_models <- 
-#   list(
-#     naive_models =
-#       model(ts_train,
-#             Naive = NAIVE(!!rlang::sym(TARGET_VAR)),
-#             Drift = RW(!!rlang::sym(TARGET_VAR) ~ drift())
-#       ),
-#     advanced_models =
-#       model(ts_train,
-#             Seasonal_naive = SNAIVE(!!rlang::sym(TARGET_VAR)),
-#             ETS = ETS(!!rlang::sym(TARGET_VAR)),
-#             ARIMA = ARIMA(!!rlang::sym(TARGET_VAR)),
-#       ))
-
-
-# forecasting <- 
-#   fitted_models %>% 
-#   map(
-#     
-#     
-#   )
-#   
-
-
-
-# features: y, (y-1)/(lag(y)-1), 1+mean(x-1)
-# 
-
-
-
-
-
-
-# fitted_models$advanced_models %>% 
-#   forecast(h = FORECASTING_DAYS) %>% 
-#   autoplot(!!rlang::sym(TARGET_VAR))
-# 
-# 
-# 
-# # model with benchmark vs advanced models
-# fitted_models %>% 
-#   map(function(models){
-#     models %>% 
-#       forecast(.,h = FORECASTING_DAYS) %>% 
-#       autoplot(ts) 
-#       # xlab("Year") + ylab("Megalitres") +
-#       # ggtitle("Forecasts for quarterly beer production") +
-#       # guides(colour=guide_legend(title="Forecast"))
-#   })
-
-
-```
-
-
-```{r}
-# all time - by date
-data$df_proc %>% 
-  semi_join(data$df_clean, by = "country_state") %>% 
-  ggplot(aes(date, y = confirmed, color = country_state)) + #  need to specify only the target var
-  geom_point(alpha = 0.3) +
-  geom_smooth(se=F,method = "gam")+
-  ggtitle("Total confirmed COVID-19 cases by country-state") +
-  ylab("total confirmed cases") + 
-  xlab("date")
-
-# since stable point 
-(
-  data$df_clean %>% 
-    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), y = confirmed, color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3)+
-    geom_smooth(se=F,method = "gam")+
-    ggtitle("Total confirmed COVID-19 cases by country-state") +
-    ylab("total confirmed cases") +
-     xlab("day")
- ) %>%  ggplotly()
-
-# since first confirmed
-(
-  data$df_proc %>% 
-    semi_join(data$df_clean, by = "country_state") %>% 
-    filter_verbose(confirmed>=1) %>%
-    group_by(country_state) %>% 
-    arrange(country_state, date) %>% 
-    mutate(n_day = row_number()) %>% 
-    ungroup() %>% 
-    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), y = log(confirmed), color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3)+
-    geom_smooth(se=F)+
-    ylab("total confirmed cases") + 
-    xlab("days (since first confirmed case)") +
-    # ylim(0,7e4)+
-    ggtitle("total confirmed cases")
-) %>% ggplotly()
-
-
-
-
-# new cases since confirmed cases > 30
-(
-  data$df_proc %>% 
-    semi_join(data$df_clean, by = "country_state") %>% 
-    filter_verbose(confirmed>=30) %>%
-    group_by(country_state) %>%
-    arrange(country_state, date) %>%
-    mutate(n_day = row_number(),
-           latest_r = r[which.max(date)]
-           ) %>%
-    ungroup() %>%
-    arrange(latest_r) %>% 
-    ggplot(aes(n_day, y = new_cases, color = country_state)) + #  need to specify only the target var
-    geom_bar(stat="identity") +
-    geom_smooth(se=F, method ="gam") +
-    # ylim(0,5e3)+
-    facet_wrap(vars(country_state), scales = "free") +
-    ggtitle("new cases by day") +
-    ylab("new cases") + 
-    xlab("days") 
-) %>% ggplotly()
-
-
-
-
-
-# R by date
-(
-  data$df_proc %>% 
-    semi_join(data$df_clean, by = "country_state") %>% 
-    # filter_verbose(confirmed>=1) %>%
-    group_by(country_state) %>% 
-    arrange(country_state, date) %>% 
-    mutate(n_day = row_number()) %>% 
-    ungroup() %>% 
-    ggplot(aes(date, r, color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3) +
-    # geom_smooth(se=F) +
-    geom_smooth(se=F, method ="gam", formula = y ~ s(x, bs = "cs",k=4)) +
-    facet_wrap(vars(country_state), scales = "free_x") +
-    ggtitle("daily growth rates R (R = total cases in day i / total cases in day i-1)", 
-            subtitle = "if R = 1 ==> NO NEW CASES")+
-    ylab("R") +
-    ylim(1,1.75)+
-    xlab("date") 
-) %>% 
-  ggplotly()
-
-
-
-
-# R since day 0
-(
-  tsbl %>% 
-    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), r, color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.5) +
-    # geom_smooth(se=F) +
-    geom_smooth(se=F, method ="gam", formula = y ~ s(x, bs = "cs",k=4)) +
-    facet_wrap(vars(country_state), scales = "free_x") +
-    ggtitle("growth rates R (R = total cases in day i / total cases in day i-1)")+
-    ylab("R") +
-    ylim(1,1.75)+
-    xlab("date") 
-) %>% 
-  ggplotly()
-
-
-
-(
-  tsbl %>% 
-    ggplot(aes(!!rlang::sym(DATE_INDEX_COL), r, color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3) +
-    geom_smooth(se=F)+
-    ylab("R") + 
-    xlab("day") +
-    ggtitle("R by day")
-)%>%  ggplotly()
-
-
-
-
-
-# log R
-(tsbl %>% 
-    ggplot(aes(date, log(r), color = country_state)) + #  need to specify only the target var
-    geom_point(alpha = 0.3) +
-    geom_smooth(se = F)+
-    ylab("log(R)") + 
-    xlab("date") +
-    ggtitle("log(R) by day"))%>% 
-  ggplotly()
-
 ```
 
 
