@@ -70,29 +70,35 @@ data_sources <-
 
 
 MIN_SAMPLE_SIZE = 14
-COUNTRY_STATE_FOR_MODELING <- 
-  c(
-    "China: Hubei",
-    "China: Non-Hubei",
-    "France: France",
-    "Germany",
-    "Iran",
-    "Italy",
-    "Spain",
-    "Korea, South",
-    "Netherlands: Netherlands",
-    "Norway",
-    "Sweden",
-    "Switzerland",
-    "United Kingdom: United Kingdom",
-    "Israel")
+df_locations_of_interest_with_restriction_date <- 
+  list(
+    "China: Hubei" = "2020-01-24", # full lockdown most population; source - https://en.wikipedia.org/wiki/2020_Hubei_lockdowns#Hubei
+    "China: Non-Hubei"= "2020-02-10", # # outdoor restrictions  (during early Feb; dat selected by Beijing which was one of the last places); source - https://en.wikipedia.org/wiki/2020_Hubei_lockdowns#Hubei
+    "France: France"= "2020-03-16", # source https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_France
+    "Germany" =  "2020-03-22",  #source: https://en.wikipedia.org/wiki/COVID-19_related_curfews_and_lockdowns
+    "Iran" =  NA,
+    "Italy" =  "2020-03-11",  #source: https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Italy#Nationwide_measures,
+    "Spain" =  "2020-03-14", #source: https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Spain (22-3-2020 in medInt)
+    "Korea, South" =  "2020-02-20", # partial restrictions source: 23 March https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_South_Korea
+    "Netherlands: Netherlands" = "2020-03-23", # strict social distancing rule https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_the_Netherlands
+    "Norway" = "2020-03-12",
+    "Sweden" = "2020-03-22", # mild social distaning - source: medInt
+    "Switzerland" = "2020-03-20", # partial restrictions # https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Switzerland
+    "United Kingdom: United Kingdom" = "2020-03-23", # source: https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_the_United_Kingdom
+    "Israel" = "2020-03-16"  # https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Israel
+  ) %>% 
+  enframe(name = "country_state", value = "restriction_date") %>% 
+  mutate(restriction_date = restriction_date %>% map(as.Date)) %>% 
+  unnest(restriction_date)
+
+#as.Date(restriction_date, "%m/%d/%y"))
 
 FORECASTING_DAYS = 7
 ```
 
 
 
-# load & tidy data
+## load & tidy data
 ```{r, echo = FALSE, message=FALSE, warning=FALSE}
 data <- 
   local({
@@ -154,9 +160,11 @@ data <-
     
     df_clean <- 
       df_proc %>% 
-      filter(
-        # (n_country_state_confirmed >= 1000 | 
-           country_state %in% COUNTRY_STATE_FOR_MODELING) %>% 
+      inner_join(df_locations_of_interest_with_restriction_date, 
+                by = "country_state") %>% 
+      # filter(
+      #   # (n_country_state_confirmed >= 1000 | 
+      #      country_state %in% COUNTRY_STATE_FOR_MODELING) %>% 
       # group_by(country_state) %>% 
       # filter(n()>=MIN_SAMPLE_SIZE) %>% 
       # ungroup() %>% 
@@ -174,8 +182,8 @@ glue::glue("date range [{min(data$df_proc$date)} - {max(data$df_proc$date)}]")
 ```
 
 
-## daily percent change in total confirmed cases:  
-## (1) trend extrapolation for next 7 days for top countries, and
+## daily % change in total confirmed cases:  
+## (1) trend extrapolation for next 7 days for selected countries (precede outbreak in IL), and
 ## (2) modeling various scenarios for Israel for the next 7 days (e.g. if its confirmed cases dynamic will be similar to Iran or S.Korea).
 ```{r }
 # fit exponentinal smoothing model for region
@@ -287,7 +295,7 @@ local({
            aes(x = n_day,y = confirmed, color = country_state),
            show.legend = FALSE) +
     geom_point(alpha = 0.4, color = "black", show.legend = FALSE)+
-    geom_smooth(se=F, show.legend = FALSE)+
+    geom_line(show.legend = FALSE)+
     ggtitle("Total confirmed COVID-19 cases by country") +
     ylab("total confirmed cases") +
     facet_wrap(~country_state, scales = "free") 
@@ -298,42 +306,60 @@ local({
 
 
 
-## % change in total cases by day 
-### (if % change = 20% in a given day ==>  total patients grew by 20% relative to the previous day ).  
-### the dashed line show extrapulation 7 days forward.
+## let's examine rate - % change in *total* cases by day 
+### (if % change = 20% in a given day ==>  total patients grew by 20% relative to the previous day).  
+### the dashed line show extrapulation for 7 days forward.
 ```{r, fig.width=10, fig.height=8}
 # daily percent change in *total* confirmed cases
-local({
+plot_prc_change <- function(x_axis = "n_day"){
   
   data_for_plot <- 
     model_data %>% 
     group_by(country_state) %>% 
-    mutate(n_day = n_day - min(n_day)) %>% 
+    mutate(n_day = n_day - min(n_day),
+           min_date = min(date),
+           max_date = max(date)) %>% 
     ungroup()
   
   plot <- 
     ggplot(data = data_for_plot,
-           aes(x = n_day,y = 100*(r-1), color = country_state),
+           aes(x = !!rlang::sym(x_axis),
+               y = 100*(r-1), 
+               color = country_state,
+               min_date = min_date,
+               max_date = max_date,
+               date = date
+               ),
            show.legend = FALSE) +
     geom_point(alpha = 0.4, color = "black") +
     geom_line(
       data = data_for_plot %>% filter(fit_type=="interpolation"),
-      aes(x=n_day,y=prc_change_in_total_cases_model, color = country_state), 
+      aes(y=prc_change_in_total_cases_model, color = country_state),
       show.legend = FALSE,
       alpha = 0.8, size = 1.0) +
     geom_line(
       data = data_for_plot %>% filter(fit_type == "extrapolation"),
-      aes(x = n_day,y = prc_change_in_total_cases_model, color = country_state),
+      aes(y = prc_change_in_total_cases_model, 
+          color = country_state),
       show.legend = FALSE,
       linetype = "dashed"
       ) +
-    ggtitle("% change in total cases") +
-    # ylim(0, 80) +
+    # geom_vline(xintercept = 0) +
+    # geom_text(x=0, y=-1,label=min_date, check_overlap = TRUE, show.legend = F)+
+    # annotate("text", 
+    #          x=0,
+    #        label=min_date, 
+    #        size=5
+           # )+
+    ggtitle("% change in total cases") + #glue("date range [{min_date} - {max_date} ]")
     ylab("% change in total cases") +
-    facet_wrap(~country_state, scales = "free") 
+    facet_wrap(~glue("{country_state}; date-range:[{min_date}-{max_date}]"), scales = "free")
   
-  suppressWarnings(print(plot))
-})
+   suppressWarnings(print(ggplotly(plot)))
+}
+
+
+plot_prc_change()
 ```
 
 
