@@ -42,7 +42,7 @@ knitr::opts_chunk$set(
 
 ```
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, warning=FALSE}
 require(pacman)
 p_load(tidyverse)
 p_load(lubridate)
@@ -54,9 +54,8 @@ p_load(glue)
 ```
 
 ## CONFIG
+### data source: https://github.com/CSSEGISandData/COVID-19
 ```{r }
-
-# data source: https://github.com/CSSEGISandData/COVID-19
 data_sources <-
   list(
  confirmed = 
@@ -67,7 +66,10 @@ data_sources <-
 
 MIN_SAMPLE_SIZE <- 14
 FORECASTING_DAYS <-  7
-COUNTRY_STATE_OF_INTEREST <- list("China: Hubei", "China: Non-Hubei", "Korea, South", "Spain", "Italy", "Norway", "Israel")
+COUNTRY_STATE_OF_INTEREST <- 
+  list("China: Hubei", "China: Non-Hubei", "Korea, South", 
+       "Spain", "Italy", "Norway", 
+       "Israel")
 ```
 
 
@@ -92,9 +94,9 @@ df_locations_of_with_restriction_date <-
     "Netherlands: Netherlands" = "2020-03-23", # strict social distancing rule https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_the_Netherlands
     "United Kingdom: United Kingdom" = "2020-03-23" # source: https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_the_United_Kingdom
   ) %>% 
-  enframe(name = "country_state", value = "restriction_date") %>% 
-  mutate(restriction_date = restriction_date %>% map(as.Date)) %>% 
-  unnest(restriction_date)
+  enframe(name = "country_state", value = "restrict_date") %>% 
+  mutate(restrict_date = restrict_date %>% map(as.Date)) %>% 
+  unnest(restrict_date)
 
 
 data <- 
@@ -108,7 +110,7 @@ data <-
             data_sources %>%
             map(read_csv)
            })
-    
+
     data_tidy <- 
       data_raw$confirmed %>%
       select(-c("Lat", "Long")) %>%
@@ -119,39 +121,40 @@ data <-
   
     df_proc <- 
       data_tidy %>% 
-      mutate(state = ifelse((country == "China" & state != "Hubei"),"Non-Hubei", state)) %>% 
-      mutate(country_state = paste0(country, ifelse(is.na(state),"", paste0(": ",state)))) %>%
-      left_join(df_locations_of_interest_with_restriction_date, 
+      mutate(state = 
+               ifelse((country == "China" & state != "Hubei"),"Non-Hubei", state)) %>% 
+      mutate(country_state = 
+               paste0(country, ifelse(is.na(state),"", paste0(": ",state)))) %>%
+      group_by(country, country_state, date) %>% # sum non Hubei provinces together
+      summarise(confirmed = sum(confirmed)) %>% 
+      ungroup() %>% 
+      left_join(df_locations_of_with_restriction_date, 
                 by = "country_state") %>% 
-      # group_by(country,country_state,date) %>% 
-      # summarise(confirmed = sum(confirmed)) %>% 
-      # group_by(country_state) %>%
-      # mutate(n_country_state_confirmed = sum(confirmed[date == max(date)])) %>%
-      # ungroup() %>%
       group_by(country_state) %>%
       arrange(date) %>%
       mutate(
-        new_cases = confirmed-lag(confirmed),
+        new_cases = max(confirmed - lag(confirmed),0),
         r = confirmed/lag(confirmed),
         r = ifelse(is.infinite(r) | is.nan(r) | is.na(r), 1, r)
-        # r = ifelse(is.nan(r), NA_real_, r),
       ) %>% 
       mutate(mean_new_cases = slider::slide_dbl(new_cases, mean, .before=3),
              mean_r = slider::slide_dbl(r, mean, .before=1, .after=1)) %>% 
       mutate(
-        date_case100 = min(date[confirmed>=100]),
-        date_peak = min(date[which.max(mean_r)]),
-        date0 = min(date[date >= date_peak +7
-                         & date >= date_case100
-                         & date >= restriction_date]),
+        # date_case100 = min(date[confirmed >= 100]),
+        # date_peak = min(date[which.max(mean_r)]),
+        date0 = min(date[date >= restrict_date
+          # date >= date_peak + 7
+          #date >= date_case100
+          ]),
         dateEnd = min(date[date > date0 & mean_new_cases == 0 ]),
-        n_row = row_number(),
-        min_nday = min(n_row[date == date0]),
-        max_nday = max(n_row) - 1,
-        is_date0na = is.na(as.POSIXlt(date0)),
-        n_day = ifelse(is_date0na, # now day0 found - non of the dates meets the cretiria
-                               n_row - max(n_row) - 1,
-                               n_row - min(n_row[date == date0]))
+        # n_row = row_number(),
+        # min_nday = min(n_row[date == date0]),
+        # max_nday = max(n_row) - 1,
+        # is_date0na = is.na(as.POSIXlt(date0)),
+        # n_day = n_row - min(n_row[date == date0])
+        # n_day = ifelse(is_date0na, # now day0 found - non of the dates meets the cretiria
+        #                        n_row - max(n_row) - 1,
+        #                        n_row - min(n_row[date == date0]))
 
        ) %>% 
       ungroup() %>% 
@@ -160,7 +163,7 @@ data <-
     df_clean <- 
       df_proc %>% 
       filter(country_state %in% COUNTRY_STATE_OF_INTEREST) %>% 
-      select(country, country_state, n_day, date, restriction_date, everything())
+      select(country, country_state, n_day, date, restrict_date, everything())
     
     res <- 
       list(
@@ -170,7 +173,8 @@ data <-
   })
 
 
-glue::glue("date range [{min(data$df_proc$date)} - {max(data$df_proc$date)}]")
+glue::glue("date range: 
+           [{min(data$df_proc$date)} - {max(data$df_proc$date)}]")
 ```
 
 
@@ -188,16 +192,6 @@ model_data <-
       # filter(n_day>=0) %>% 
       as_tsibble(key = c("country","country_state"),
                  index = n_day)
-    
-    z <- tsbl$country_state %>% unique() %>% 
-      map(.f = 
-            function(loc) {
-              print(loc); 
-              tsbl %>% filter(country_state == loc) %>% 
-               model(ETS(r ~ error("A") + trend("A") + season("N"),  
-                         opt_crit = "mae"))
-              }) 
-    
     
     ETS_model_fitted <- 
       tsbl %>% 
@@ -269,8 +263,10 @@ model_data <-
        select(
          country,
          country_state, 
+         n_day, 
          date,
-         date0, n_day, new_cases, confirmed, confirmed_model,
+         date0, restrict_date, 
+         new_cases, confirmed, confirmed_model,
          r, fit_type, r_model, prc_change_in_total_cases_model, 
          date_peak
        )
@@ -278,31 +274,99 @@ model_data <-
 
 
 
-
 ```
 
 
-# Total confirmed cases by day for regions of interest
-```{r, fig.width=10, fig.height=8}
+
+# Total confirmed cases by day since case 1.
+```{r, fig.width=4, fig.height=2.6}
 local({
   
-  data_for_plot <- 
+    data_for_plot <- 
     model_data %>% 
+    filter(fit_type == "interpolation") %>% 
     group_by(country_state) %>% 
     mutate(n_day = n_day - min(n_day)) %>% 
+    mutate(n_day_restrict = min(n_day[date == restrict_date], na.rm = T),
+           country_state_restrict_date = paste0(country_state,": ", restrict_date)) %>% 
     ungroup()
   
   plot <- 
     ggplot(data = data_for_plot,
-           aes(x = n_day,y = confirmed, color = country_state),
+           aes(x = n_day,y = confirmed, date = date, color = country_state),
            show.legend = FALSE) +
-    geom_point(alpha = 0.4, color = "black", show.legend = FALSE)+
-    geom_line(show.legend = FALSE)+
+    geom_point(alpha = 0.6, color = "black", show.legend = FALSE)+
+    geom_line(alpha = 0.6,show.legend = FALSE)+
     ggtitle("Total confirmed COVID-19 cases by country") +
-    ylab("total confirmed cases") +
-    facet_wrap(~country_state, scales = "free") 
+    geom_vline(aes(xintercept = n_day_restrict, date= date),
+               show.legend = FALSE)  +
+    geom_text(mapping = aes(label = "social restriction",
+                            x = n_day_restrict,
+                            y = -Inf
+                            ),
+              angle = 60, hjust = -0.1,nudge_x = 1,
+              show.legend = FALSE)+
+    theme(legend.position='none')+
+     facet_wrap(~country_state_restrict_date, 
+               scales = "free") 
   
   suppressWarnings(print(plot))
+  
+  ggp_build <- plotly_build(plot)
+  ggp_build$layout$height = 800
+  ggp_build$layout$width = 1000
+  
+  print(ggp_build)
+})
+```
+
+
+
+# Log(Total confirmed cases) by Date
+```{r, fig.width=4, fig.height=2.6}
+local({
+  
+  data_for_plot <- 
+    model_data %>% 
+    filter(fit_type == "interpolation") %>% 
+    group_by(country_state) %>% 
+    mutate(n_day = n_day - min(n_day)) %>% 
+    mutate(n_day_restrict = min(n_day[date == restrict_date], na.rm = T),
+           country_state_restrict_date = paste0(country_state,": ", restrict_date)) %>% 
+    ungroup()
+  
+  plot <- 
+    ggplot(data = data_for_plot,
+           aes(x = date, 
+               y = confirmed, 
+               n_day = n_day, 
+               restrict_date = restrict_date,
+               country_state_restrict_date = country_state_restrict_date,
+               color = country_state)) +
+    geom_point(alpha = 0.6, color = "black", show.legend = FALSE) +
+    geom_line(alpha = 0.6,show.legend = FALSE) +
+    ggtitle("Log(confirmed) by date country") +
+    geom_vline(aes(xintercept = restrict_date),
+               show.legend = FALSE)  +
+    geom_text(aes(label = "restrict_date",
+                            x = restrict_date,
+                            y = -Inf),
+              angle = 60, hjust = -0.1,nudge_x = 1,
+              show.legend = FALSE) +
+    # ylab("total confirmed cases") +
+    theme(legend.position='none')+
+    scale_y_log10()+
+    facet_wrap(~country_state_restrict_date, 
+               scales = "free") 
+  
+  suppressWarnings(print(plot))
+  # 
+  # ggplotly(plot)
+  # ggp_build <- plotly_build(plot)
+  # ggp_build$layout$height = 800
+  # ggp_build$layout$width = 1000
+  # 
+  # print(ggp_build)
 })
 ```
 
@@ -315,12 +379,13 @@ local({
 # daily percent change in *total* confirmed cases
 plot_prc_change <- function(x_axis = "n_day"){
   
-  data_for_plot <- 
+    data_for_plot <- 
     model_data %>% 
+    filter(fit_type == "interpolation") %>% 
     group_by(country_state) %>% 
-    mutate(n_day = n_day - min(n_day),
-           min_date = min(date),
-           max_date = max(date)) %>% 
+    mutate(n_day = n_day - min(n_day)) %>% 
+    mutate(n_day_restrict = min(n_day[date == restrict_date], na.rm = T),
+           country_state_restrict_date = paste0(country_state,": ", restrict_date)) %>% 
     ungroup()
   
   plot <- 
@@ -328,8 +393,6 @@ plot_prc_change <- function(x_axis = "n_day"){
            aes(x = !!rlang::sym(x_axis),
                y = 100*(r-1), 
                color = country_state,
-               min_date = min_date,
-               max_date = max_date,
                date = date
                ),
            show.legend = FALSE) +
@@ -387,11 +450,11 @@ ts_forecast <-
     min_diff_date = date[which.min(abs_diff)],
     dateStart = min_diff_date,  #note that this is "today" not a forecasted day
     dateEnd = dateStart + FORECASTING_DAYS) %>% 
-  filter(date >= dateStart, date <= dateEnd) %>% 
+  filter(date >= dateStart, date <= dateEnd) %>%
   filter(abs_diff<=0.1) %>% 
   filter(n() == FORECASTING_DAYS + 1) %>% 
    mutate( # fill mising dates
-    date_il = df_latest_day_IL$date + lubridate::days(0:7),
+    date_il = df_latest_day_IL$date + lubridate::days(0:FORECASTING_DAYS),
     confirmed_forecast_isr = # predict IL by other cointries
       Reduce(init = df_latest_day_IL$confirmed,
              x = lead(r_model), 
