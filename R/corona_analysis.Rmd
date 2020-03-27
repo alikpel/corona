@@ -59,47 +59,44 @@ p_load(glue)
 # data source: https://github.com/CSSEGISandData/COVID-19
 data_sources <-
   list(
- confirmed = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv",
- deaths = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"
+ confirmed = 
+   "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv",
+ deaths = 
+   "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"
   )
-# data_sources <-
-#   list(
-#     confirmed = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv",
-#     deaths = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Deaths.csv"
-#   )
 
-
-MIN_SAMPLE_SIZE = 14
-df_locations_of_interest_with_restriction_date <- 
-  list(
-    "China: Hubei" = "2020-01-24", # full lockdown most population; source - https://en.wikipedia.org/wiki/2020_Hubei_lockdowns#Hubei
-    "China: Non-Hubei"= "2020-02-10", # # outdoor restrictions  (during early Feb; dat selected by Beijing which was one of the last places); source - https://en.wikipedia.org/wiki/2020_Hubei_lockdowns#Hubei
-    "France: France"= "2020-03-16", # source https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_France
-    "Germany" =  "2020-03-22",  #source: https://en.wikipedia.org/wiki/COVID-19_related_curfews_and_lockdowns
-    "Iran" =  NA,
-    "Italy" =  "2020-03-11",  #source: https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Italy#Nationwide_measures,
-    "Spain" =  "2020-03-14", #source: https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Spain (22-3-2020 in medInt)
-    "Korea, South" =  "2020-02-20", # partial restrictions source: 23 March https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_South_Korea
-    "Netherlands: Netherlands" = "2020-03-23", # strict social distancing rule https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_the_Netherlands
-    "Norway" = "2020-03-12",
-    "Sweden" = "2020-03-22", # mild social distaning - source: medInt
-    "Switzerland" = "2020-03-20", # partial restrictions # https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Switzerland
-    "United Kingdom: United Kingdom" = "2020-03-23", # source: https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_the_United_Kingdom
-    "Israel" = "2020-03-16"  # https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Israel
-  ) %>% 
-  enframe(name = "country_state", value = "restriction_date") %>% 
-  mutate(restriction_date = restriction_date %>% map(as.Date)) %>% 
-  unnest(restriction_date)
-
-#as.Date(restriction_date, "%m/%d/%y"))
-
-FORECASTING_DAYS = 7
+MIN_SAMPLE_SIZE <- 14
+FORECASTING_DAYS <-  7
+COUNTRY_STATE_OF_INTEREST <- list("China: Hubei", "China: Non-Hubei", "Korea, South", "Spain", "Italy", "Norway", "Israel")
 ```
 
 
 
 ## load & tidy data
 ```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+df_locations_of_with_restriction_date <- 
+  list(
+    "China: Hubei" = "2020-01-24", # full lockdown most population; source - https://en.wikipedia.org/wiki/2020_Hubei_lockdowns#Hubei
+    "China: Non-Hubei"= "2020-02-10", # # outdoor restrictions  (during early Feb; dat selected by Beijing which was one of the last places); source - https://en.wikipedia.org/wiki/2020_Hubei_lockdowns#Hubei
+    "Korea, South" =  "2020-02-20", # partial restrictions source: 23 March https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_South_Korea
+    "Spain" =  "2020-03-14", #source: https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Spain (22-3-2020 in medInt)
+    "Italy" =  "2020-03-11",  #source: https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Italy#Nationwide_measures,
+    "Norway" = "2020-03-12",
+    "Israel" = "2020-03-16",  # https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Israel
+    "France: France"= "2020-03-16", # source https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_France
+    "Switzerland" = "2020-03-20", # partial restrictions # https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_Switzerland
+    "Sweden" = "2020-03-22", # mild social distaning - source: medInt
+    "Germany" =  "2020-03-22",  #source: https://en.wikipedia.org/wiki/COVID-19_related_curfews_and_lockdowns
+    # "Iran" =  NA,
+    "Netherlands: Netherlands" = "2020-03-23", # strict social distancing rule https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_the_Netherlands
+    "United Kingdom: United Kingdom" = "2020-03-23" # source: https://en.wikipedia.org/wiki/2020_coronavirus_pandemic_in_the_United_Kingdom
+  ) %>% 
+  enframe(name = "country_state", value = "restriction_date") %>% 
+  mutate(restriction_date = restriction_date %>% map(as.Date)) %>% 
+  unnest(restriction_date)
+
+
 data <- 
   local({
     
@@ -123,7 +120,7 @@ data <-
     df_proc <- 
       data_tidy %>% 
       mutate(state = ifelse((country == "China" & state != "Hubei"),"Non-Hubei", state)) %>% 
-      mutate(country_state = paste0(country, ifelse(is.na(state),"",paste0(": ",state)))) %>%
+      mutate(country_state = paste0(country, ifelse(is.na(state),"", paste0(": ",state)))) %>%
       left_join(df_locations_of_interest_with_restriction_date, 
                 by = "country_state") %>% 
       # group_by(country,country_state,date) %>% 
@@ -162,8 +159,7 @@ data <-
     
     df_clean <- 
       df_proc %>% 
-      semi_join(df_locations_of_interest_with_restriction_date, 
-                by = "country_state") %>%
+      filter(country_state %in% COUNTRY_STATE_OF_INTEREST) %>% 
       select(country, country_state, n_day, date, restriction_date, everything())
     
     res <- 
@@ -192,6 +188,16 @@ model_data <-
       # filter(n_day>=0) %>% 
       as_tsibble(key = c("country","country_state"),
                  index = n_day)
+    
+    z <- tsbl$country_state %>% unique() %>% 
+      map(.f = 
+            function(loc) {
+              print(loc); 
+              tsbl %>% filter(country_state == loc) %>% 
+               model(ETS(r ~ error("A") + trend("A") + season("N"),  
+                         opt_crit = "mae"))
+              }) 
+    
     
     ETS_model_fitted <- 
       tsbl %>% 
