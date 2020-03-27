@@ -119,17 +119,18 @@ data <-
       set_colnames(c("state","country", "date", "confirmed")) %>%
       filter(confirmed>=which.min(confirmed>=1)) %>% 
       mutate(date=as.Date(date, "%m/%d/%y")) 
-      # filter(date<="2020-03-22") #debug
-    
+  
     df_proc <- 
       data_tidy %>% 
       mutate(state = ifelse((country == "China" & state != "Hubei"),"Non-Hubei", state)) %>% 
       mutate(country_state = paste0(country, ifelse(is.na(state),"",paste0(": ",state)))) %>%
-      group_by(country,country_state,date) %>% 
-      summarise(confirmed = sum(confirmed)) %>% 
-      group_by(country_state) %>%
-      mutate(n_country_state_confirmed = sum(confirmed[date == max(date)])) %>%
-      ungroup() %>%
+      left_join(df_locations_of_interest_with_restriction_date, 
+                by = "country_state") %>% 
+      # group_by(country,country_state,date) %>% 
+      # summarise(confirmed = sum(confirmed)) %>% 
+      # group_by(country_state) %>%
+      # mutate(n_country_state_confirmed = sum(confirmed[date == max(date)])) %>%
+      # ungroup() %>%
       group_by(country_state) %>%
       arrange(date) %>%
       mutate(
@@ -144,7 +145,8 @@ data <-
         date_case100 = min(date[confirmed>=100]),
         date_peak = min(date[which.max(mean_r)]),
         date0 = min(date[date >= date_peak +7
-                         & date >= date_case100]),
+                         & date >= date_case100
+                         & date >= restriction_date]),
         dateEnd = min(date[date > date0 & mean_new_cases == 0 ]),
         n_row = row_number(),
         min_nday = min(n_row[date == date0]),
@@ -160,15 +162,9 @@ data <-
     
     df_clean <- 
       df_proc %>% 
-      inner_join(df_locations_of_interest_with_restriction_date, 
-                by = "country_state") %>% 
-      # filter(
-      #   # (n_country_state_confirmed >= 1000 | 
-      #      country_state %in% COUNTRY_STATE_FOR_MODELING) %>% 
-      # group_by(country_state) %>% 
-      # filter(n()>=MIN_SAMPLE_SIZE) %>% 
-      # ungroup() %>% 
-      select(country, country_state, n_day, n_country_state_confirmed, date, everything())
+      semi_join(df_locations_of_interest_with_restriction_date, 
+                by = "country_state") %>%
+      select(country, country_state, n_day, date, restriction_date, everything())
     
     res <- 
       list(
