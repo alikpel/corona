@@ -133,7 +133,7 @@ data <-
       group_by(country_state) %>%
       arrange(date) %>%
       mutate(
-        new_cases = max(confirmed - lag(confirmed),0),
+        new_cases = pmax(confirmed - lag(confirmed),0),
         r = confirmed/lag(confirmed),
         r = ifelse(is.infinite(r) | is.nan(r) | is.na(r), 1, r)
       ) %>% 
@@ -163,7 +163,7 @@ data <-
     df_clean <- 
       df_proc %>% 
       filter(country_state %in% COUNTRY_STATE_OF_INTEREST) %>% 
-      select(country, country_state, n_day, date, restrict_date, everything())
+      select(country, country_state,date, restrict_date, everything())
     
     res <- 
       list(
@@ -191,7 +191,7 @@ model_data <-
       mutate(r = ifelse(date == date0, 1, r)) %>% 
       # filter(n_day>=0) %>% 
       as_tsibble(key = c("country","country_state"),
-                 index = n_day)
+                 index = date)
     
     ETS_model_fitted <- 
       tsbl %>% 
@@ -205,7 +205,7 @@ model_data <-
       select(
         country,
         country_state, 
-        n_day,
+        date,
         r_model = .fitted)
     
      extrapolation <- 
@@ -214,7 +214,7 @@ model_data <-
        as_tibble() %>% 
        select(country,
               country_state, 
-              n_day,
+              date,
               r_model = r)
      
      fitted_data <- 
@@ -226,17 +226,17 @@ model_data <-
      model_data <- 
        fitted_data %>% 
        full_join(data$df_clean, 
-                 by = c("country","country_state", "n_day")) %>% 
+                 by = c("country","country_state", "date")) %>% 
        mutate(prc_change_in_total_cases_model = 100*(r_model - 1)) %>%
       group_by(country_state) %>% 
        arrange(date) %>% 
        # fill missing date for extrapulated value 
        mutate(
-         date_latest = date[which.max(date)], #only interpulated data has dates after the join
-         n_day_latest = max(n_day[which.max(date)]),
-         confirmed_latest = max(confirmed[which.max(date)]),
+         # date_latest = date[which.max(date)], #only interpulated data has dates after the join
+         # n_day_latest = max(n_day[which.max(date)]),
+         confirmed_latest = max(confirmed[which.max(date[fit_type ==  "interpolation"])]) #max(confirmed[which.max(date)]),  
          # confirmed_first = min(confirmed[which.min(date)]),
-         date = date_latest + days(n_day-n_day_latest)
+         # date = date_latest + days(n_day-n_day_latest)
          ) %>% # add date to extrapolated values
        ungroup() %>%
        # calc confirmed case by model r for the extrapolated entries
@@ -263,37 +263,39 @@ model_data <-
        select(
          country,
          country_state, 
-         n_day, 
+         # n_day, 
          date,
          date0, restrict_date, 
          new_cases, confirmed, confirmed_model,
-         r, fit_type, r_model, prc_change_in_total_cases_model, 
-         date_peak
+         r, fit_type, r_model, prc_change_in_total_cases_model
+         # date_peak
        )
   })
-
-
 
 ```
 
 
-
-# Total confirmed cases by day since case 1.
-```{r, fig.width=4, fig.height=2.6}
+# log(Total confirmed) cases by day since case 1.
+```{r, fig.width=4, fig.height=2}
 local({
   
-    data_for_plot <- 
+  data_for_plot <- 
     model_data %>% 
-    filter(fit_type == "interpolation") %>% 
     group_by(country_state) %>% 
-    mutate(n_day = n_day - min(n_day)) %>% 
+    mutate(n_day = difftime(date, min(date), units = "days") %>% as.integer()) %>% 
     mutate(n_day_restrict = min(n_day[date == restrict_date], na.rm = T),
-           country_state_restrict_date = paste0(country_state,": ", restrict_date)) %>% 
-    ungroup()
+           country_state_restrict_date = paste0(country_state,"; social restriction: ", restrict_date)) %>% 
+    ungroup() %>% 
+    filter(fit_type == "interpolation") 
   
   plot <- 
     ggplot(data = data_for_plot,
-           aes(x = n_day,y = confirmed, date = date, color = country_state),
+           aes(x = n_day,
+               y = log(confirmed), 
+               date = date, 
+               color = country_state,
+               r_model = round(r_model,3)
+               ),
            show.legend = FALSE) +
     geom_point(alpha = 0.6, color = "black", show.legend = FALSE)+
     geom_line(alpha = 0.6,show.legend = FALSE)+
@@ -304,7 +306,8 @@ local({
                             x = n_day_restrict,
                             y = -Inf
                             ),
-              angle = 60, hjust = -0.1,nudge_x = 1,
+              angle = 90, hjust = -0.5, nudge_x = 1,
+              size = 1.5,
               show.legend = FALSE)+
     theme(legend.position='none')+
      facet_wrap(~country_state_restrict_date, 
@@ -314,7 +317,7 @@ local({
   
   ggp_build <- plotly_build(plot)
   ggp_build$layout$height = 800
-  ggp_build$layout$width = 1000
+  ggp_build$layout$width = 1200
   
   print(ggp_build)
 })
@@ -323,50 +326,55 @@ local({
 
 
 # Log(Total confirmed cases) by Date
-```{r, fig.width=4, fig.height=2.6}
+```{r, fig.width=4, fig.height=2.1}
 local({
   
   data_for_plot <- 
     model_data %>% 
-    filter(fit_type == "interpolation") %>% 
     group_by(country_state) %>% 
-    mutate(n_day = n_day - min(n_day)) %>% 
-    mutate(n_day_restrict = min(n_day[date == restrict_date], na.rm = T),
-           country_state_restrict_date = paste0(country_state,": ", restrict_date)) %>% 
-    ungroup()
+    mutate(n_day_since_rest = difftime(date, restrict_date, units = "days") %>% as.integer() ,
+    # mutate(n_day_restrict = min(n_day[date == restrict_date], na.rm = T),
+           country_state_restrict_date = paste0(country_state,"; social restriction: ", restrict_date)
+           ) %>% 
+    ungroup() %>% 
+    filter(fit_type == "interpolation") 
   
   plot <- 
     ggplot(data = data_for_plot,
-           aes(x = date, 
+           aes(x = n_day_since_rest, 
                y = confirmed, 
-               n_day = n_day, 
-               restrict_date = restrict_date,
-               country_state_restrict_date = country_state_restrict_date,
-               color = country_state)) +
-    geom_point(alpha = 0.6, color = "black", show.legend = FALSE) +
-    geom_line(alpha = 0.6,show.legend = FALSE) +
-    ggtitle("Log(confirmed) by date country") +
-    geom_vline(aes(xintercept = restrict_date),
-               show.legend = FALSE)  +
-    geom_text(aes(label = "restrict_date",
-                            x = restrict_date,
-                            y = -Inf),
-              angle = 60, hjust = -0.1,nudge_x = 1,
-              show.legend = FALSE) +
+               n_day_since_rest = n_day_since_rest,
+               # n_day = n_day, 
+               # restrict_date = restrict_date,
+               # country_state_restrict_date = country_state_restrict_date,
+               color = country_state,
+               r_model = r_model)
+           ) +
+    geom_point(alpha = 0.6, color = "black") +
+    geom_line(alpha = 0.8) +
+    ggtitle("Log(confirmed) by num days since social restriction") +
+    # geom_vline(aes(xintercept = 0),
+    #            show.legend = FALSE)  +
+    # geom_text(aes(label = "restrict_date",
+    #                         x = 0,
+    #                         y = -Inf),
+    #           angle = 60, hjust = -0.1,nudge_x = 1,
+    #           show.legend = FALSE) +
     # ylab("total confirmed cases") +
+    xlab("days since social restriction") +
     theme(legend.position='none')+
     scale_y_log10()+
-    facet_wrap(~country_state_restrict_date, 
-               scales = "free") 
+    facet_wrap(~country_state_restrict_date,
+               scales = "free")
   
   suppressWarnings(print(plot))
-  # 
-  # ggplotly(plot)
-  # ggp_build <- plotly_build(plot)
-  # ggp_build$layout$height = 800
-  # ggp_build$layout$width = 1000
-  # 
-  # print(ggp_build)
+
+  ggplotly(plot)
+  ggp_build <- plotly_build(plot)
+  ggp_build$layout$height = 800
+  ggp_build$layout$width = 1400
+
+  print(ggp_build)
 })
 ```
 
@@ -377,26 +385,28 @@ local({
 ### the dashed line show extrapulation for 7 days forward.
 ```{r, fig.width=10, fig.height=8}
 # daily percent change in *total* confirmed cases
-plot_prc_change <- function(x_axis = "n_day"){
+local({
   
-    data_for_plot <- 
+  data_for_plot <- 
     model_data %>% 
-    filter(fit_type == "interpolation") %>% 
     group_by(country_state) %>% 
-    mutate(n_day = n_day - min(n_day)) %>% 
-    mutate(n_day_restrict = min(n_day[date == restrict_date], na.rm = T),
-           country_state_restrict_date = paste0(country_state,": ", restrict_date)) %>% 
-    ungroup()
-  
+    mutate(n_day_since_rest = difftime(date, restrict_date, units = "days") %>% as.integer() ,
+           country_state_restrict_date = paste0(country_state,"; social restriction: ", restrict_date),
+           min_date = min(date),
+           max_date = max(date)
+    ) %>% 
+    ungroup() %>% 
+    filter(fit_type == "interpolation") 
+
   plot <- 
     ggplot(data = data_for_plot,
-           aes(x = !!rlang::sym(x_axis),
+           aes(x = n_day_since_rest,
                y = 100*(r-1), 
                color = country_state,
-               date = date
-               ),
+           ),
            show.legend = FALSE) +
-    geom_point(alpha = 0.4, color = "black") +
+    geom_point(alpha = 0.4, 
+               color = "black") +
     geom_line(
       data = data_for_plot %>% filter(fit_type=="interpolation"),
       aes(y=prc_change_in_total_cases_model, color = country_state),
@@ -408,23 +418,16 @@ plot_prc_change <- function(x_axis = "n_day"){
           color = country_state),
       show.legend = FALSE,
       linetype = "dashed"
-      ) +
-    # geom_vline(xintercept = 0) +
-    # geom_text(x=0, y=-1,label=min_date, check_overlap = TRUE, show.legend = F)+
-    # annotate("text", 
-    #          x=0,
-    #        label=min_date, 
-    #        size=5
-           # )+
+    ) +
     ggtitle("% change in total cases") + #glue("date range [{min_date} - {max_date} ]")
     ylab("% change in total cases") +
-    facet_wrap(~glue("{country_state}; date-range:[{min_date}-{max_date}]"), scales = "free")
+    facet_wrap(~country_state_restrict_date,
+               scales = "free")
   
-   suppressWarnings(print(ggplotly(plot)))
-}
+  suppressWarnings(print(plot))
+  
+})
 
-
-plot_prc_change()
 ```
 
 
@@ -436,7 +439,9 @@ df_latest_day_IL <-
          fit_type == "interpolation") %>% 
   top_n(wt = date, n = 1)
 
-print(glue("Israel {df_latest_day_IL$date}: r_model {df_latest_day_IL $r_model}; confirmed cases: {df_latest_day_IL$confirmed} "))
+print(glue("Israel at {df_latest_day_IL$date}: 
+            r_model {round(df_latest_day_IL$r_model,3)} 
+            confirmed cases: {df_latest_day_IL$confirmed} "))
 
 # generate forecast for IL based on each countrty (calc 7 days fwd r_model)
 ts_forecast <- 
@@ -451,7 +456,7 @@ ts_forecast <-
     dateStart = min_diff_date,  #note that this is "today" not a forecasted day
     dateEnd = dateStart + FORECASTING_DAYS) %>% 
   filter(date >= dateStart, date <= dateEnd) %>%
-  filter(abs_diff<=0.1) %>% 
+  filter(min(abs_diff)<=0.1) %>% 
   filter(n() == FORECASTING_DAYS + 1) %>% 
    mutate( # fill mising dates
     date_il = df_latest_day_IL$date + lubridate::days(0:FORECASTING_DAYS),
