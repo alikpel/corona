@@ -1,0 +1,135 @@
+---
+title: "corona_analysis"
+output:
+  html_document:
+    fig_width: 6
+    fig_height: 4
+
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file, 
+  encoding=encoding,
+  output_file=here::here(out_dir,"index.html")
+ )
+ })
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  collapse = TRUE,
+  comment = "#>",
+  rownames.print = 50,
+  cols.print=30)
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+require(pacman)
+p_load(tidyverse)
+p_load(lubridate)
+p_load(magrittr)
+p_load(fpp3)
+p_load(plotly)
+p_load(slider)
+p_load(glue)
+```
+
+# CONFIG
+```{r}
+
+countries_of_interest <- 
+  list(
+    "Korea, South",
+    "Spain", 
+    "Italy" ,
+    "Norway",
+    "Israel", 
+    "France",
+    "Switzerland", 
+    "Sweden",
+    "Germany",
+    "Netherlands", 
+    "UK"
+  )
+
+
+```
+
+
+```{r}
+df <- 
+  read_csv("./data/daily_records_worldmeters.csv") %>% 
+  select(
+    country = Country,
+    date = Date,
+    confirmed = `Total Cases`,
+    critical = Critical,
+    recovered = `Total Recovered`,
+    death = `Total Deaths`
+  ) %>% 
+  arrange(country, date) %>% 
+  mutate(
+    date = as.Date(date,"%d-%m-%Y"),
+    active = confirmed - recovered - death,
+    new_cases = pmax(confirmed - lag(confirmed),0)
+  ) %>% 
+  mutate(
+    r_critial = critical/lag(critical),
+    r_critial = ifelse(is.infinite(r_critial) | is.nan(r_critial) | is.na(r_critial), 1, r_critial),
+    r_active = active/lag(active),
+    r_active = ifelse(is.infinite(r_active) | is.nan(r_active) | is.na(r_active), 1, r_active)
+)
+
+
+tf <- 
+  df %>% 
+   filter(country %in% countries_of_interest) %>% 
+  as_tsibble(key = country, index = date)
+
+```
+
+
+
+
+```{r}
+
+tf %>% 
+  group_by(country) %>% 
+  filter(confirmed>10) %>% 
+  ungroup() %>% 
+  ggplot(aes(y= critical, x= date, color = country))+
+  geom_line()
+
+```
+
+
+
+# find best autocor
+```{r fig.width=6, fig.height=2}
+
+
+countries_of_interest %>% 
+  map(function(country){
+    tf %>% 
+      filter(country == country) %>% 
+      {ccf(.$critical, .$confirmed, lag.max=21,  type = c("correlation"), plot=TRUE, main="country: critical vs. confirmed")}
+  })
+
+```
+
+```{r fig.width=6, fig.height=2}
+
+
+countries_of_interest %>% 
+  map(function(country){
+    tf %>% 
+      filter(country == country) %>% 
+      {ccf(.$critical, .$confirmed, lag.max=21,  type = c("correlation"), main="country: critical vs. confirmed")}
+  })
+
+```
+```
+
+
