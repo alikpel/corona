@@ -241,9 +241,15 @@ tf_enriched <-
   ungroup()
 
 (tf_enriched %>% 
-  ggplot(aes(x=nday, y=round(prc_critical_active_lagged,2), color = country)) + 
+  ggplot(aes(x=nday, 
+             y=round(prc_critical_active_lagged,2), 
+             critical = critical,
+             lag_active = lag_active,
+             active = active,
+             
+             color = country)) + 
   geom_line() +
-    ggtitle("Convert rate - % critcal out of active (7 day lag)")+
+    ggtitle("Convertion rate - % critcal out of active (7 day lag)")+
   # theme(legend.position='none')+
   facet_wrap(~country, scales = "free_x")) %>% 
   ggplotly
