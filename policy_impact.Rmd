@@ -9,7 +9,7 @@ knit: (function(input_file, encoding) {
   out_dir <- 'docs';
   rmarkdown::render(input_file, 
   encoding=encoding,
-  output_file=here::here(out_dir,"index.html")
+  output_file=here::here(out_dir,"index2.html")
  )
  })
     
@@ -34,6 +34,7 @@ p_load(fpp3)
 p_load(plotly)
 p_load(slider)
 p_load(glue)
+p_load(hrbrthemes)
 ```
 
 # CONFIG
@@ -112,42 +113,35 @@ data_for_plot <-
 
 
 # active & critical vs time (log scale)
-```{r}
+```{r, fig.width=11, fig.height=6}
   data_for_plot %>% 
   ggplot(aes(x = nday, color = country)) +
   geom_line(aes(y = log(critical))) +
   geom_line(aes(y = log(active))) +
   ylab("active & critical (log scale")+
   ggtitle("log(active) & log(critical) vs. time")+
-  facet_wrap(~country)
+  facet_wrap(~country, scales = "free_x")
 ```
 
 
 # optimal lag between active and critical
 ```{r}
-library(hrbrthemes)
-# 
-# ccf2 <- function(df,v1,v2,lag.max){
-#   tidy(ccf(df[v1],df[v2],lag.max))
-# }
-# 
 
 
 # active slove vs. critical slope: active-lag(active,1) vs. critical-lag(critical
 local({
-ccf_active_critival_new_cases <- 
-  data_for_plot %>% 
-  update_tsibble(index = nday) %>% 
-CCF(active-lag(active,1), critical-lag(critical,1)) 
+ccf_active_critival_new_cases <-
+  data_for_plot %>%
+  update_tsibble(index = nday) %>%
+CCF(active-lag(active,1), critical-lag(critical,1))
 
 ccf_active_critival_new_cases %>% autoplot()
 
-ccf_active_critival_new_cases %>% 
-  update_tsibble(index = nday) %>% 
-  filter(abs(lag)<=14) %>% 
-  group_by(country) %>% 
-  filter(ccf == max(ccf) & abs(max(ccf))>=0.1) %>% 
-  arrange(desc(ccf)) %>% 
+ccf_active_critival_new_cases %>%
+  filter(abs(lag)<=14) %>%
+  group_by(country) %>%
+  filter(ccf == max(ccf) & abs(max(ccf))>=0.1) %>%
+  arrange(desc(ccf)) %>%
   mutate(ccf = round(ccf,2))
 })
 
@@ -215,7 +209,7 @@ local({
 
 
 # r_active & r_critical vs time
-```{r}
+```{r, fig.width=11, fig.height=6}
   data_for_plot %>% 
   ggplot(aes(x = nday)) +
   geom_line(aes(y = r_critical, color = "critical")) +
@@ -229,7 +223,7 @@ local({
 
 
 # % active vs. time
-```{r, fig.width=4, fig.height=2}
+```{r, fig.width=11, fig.height=6}
 
 OPT_ACTIVE_CRITICAL_LAG <- 7
 
@@ -242,13 +236,16 @@ tf_enriched <-
   mutate(r_active_lag = lag(active, OPT_ACTIVE_CRITICAL_LAG),
          lag_active = lag(active, OPT_ACTIVE_CRITICAL_LAG),
          prc_critical_active_lagged = 100*critical/lag_active,
-         prc_critical_active_lagged = ifelse(is.infinite(r) | is.nan(r) | is.na(r), 1, r)
+         prc_critical_active_lagged = ifelse(is.infinite(prc_critical_active_lagged) | is.nan(prc_critical_active_lagged) | is.na(prc_critical_active_lagged), 0, prc_critical_active_lagged) %>% pmax(0) %>% pmin(100)
          ) %>% 
   ungroup()
 
-tf_enriched %>% 
-  ggplot(aes(x=nday, y=prc_critical_active_lagged, color = country)) + 
-  geom_line()
+(tf_enriched %>% 
+  ggplot(aes(x=nday, y=round(prc_critical_active_lagged,1), color = country)) + 
+  geom_line() +
+  # theme(legend.position='none')+
+  facet_wrap(~country, scales = "free_x")) %>% 
+  ggplotly
 
 
 
