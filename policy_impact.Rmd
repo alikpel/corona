@@ -41,7 +41,7 @@ p_load(glue)
 
 countries_of_interest <- 
   list(
-    "Korea, South",
+    "S. Korea", #"Korea, South",
     "Spain", 
     "Italy" ,
     "Norway",
@@ -69,24 +69,30 @@ df <-
     recovered = `Total Recovered`,
     death = `Total Deaths`
   ) %>% 
-  arrange(country, date) %>% 
   mutate(
     date = as.Date(date,"%d-%m-%Y"),
-    active = confirmed - recovered - death,
-    new_cases = pmax(confirmed - lag(confirmed),0)
   ) %>% 
+  group_by(country) %>% 
+  arrange(date) %>% 
   mutate(
-    r_critial = critical/lag(critical),
-    r_critial = ifelse(is.infinite(r_critial) | is.nan(r_critial) | is.na(r_critial), 1, r_critial),
+    active = confirmed - recovered - death,
+    new_cases = pmax(confirmed - lag(confirmed),0),
+    r_lag_critical = lag(critical),
+    r_critical = critical/lag(critical),
+    r_critical = ifelse(is.infinite(r_critical) | is.nan(r_critical) | is.na(r_critical), 1, r_critical),
     r_active = active/lag(active),
     r_active = ifelse(is.infinite(r_active) | is.nan(r_active) | is.na(r_active), 1, r_active)
-)
+) %>% 
+  ungroup() %>% 
+   arrange(country,date) 
 
 
 tf <- 
   df %>% 
-   filter(country %in% countries_of_interest) %>% 
+  filter(country %in% countries_of_interest) %>% 
   as_tsibble(key = country, index = date)
+
+# df %>% filter(country == "France") %>% view
 
 ```
 
@@ -95,38 +101,158 @@ tf <-
 
 ```{r}
 
-tf %>% 
+data_for_plot <-
+  tf %>% 
   group_by(country) %>% 
-  filter(confirmed>10) %>% 
-  ungroup() %>% 
-  ggplot(aes(y= critical, x= date, color = country))+
-  geom_line()
+  filter(date >= min(date[active>=1])) %>%  
+  mutate(nday = difftime(date, min(date), units = "days") %>% as.integer()) %>% 
+  ungroup() 
+```
+
+
+# active & critical vs time (log scale)
+```{r}
+  data_for_plot %>% 
+  ggplot(aes(x = nday, color = country)) +
+  geom_line(aes(y = log(critical))) +
+  geom_line(aes(y = log(active))) +
+  ylab("active & critical (log scale")+
+  ggtitle("log(active) & log(critical) vs. time")+
+  facet_wrap(~country)
+```
+
+
+# optimal lag between active and critical
+```{r}
+
+ccf2 <- function(df,v1,v2,lag.max){
+  tidy(ccf(df[v1],df[v2],lag.max))
+}
+
+
+
+ccf_active_critival <- 
+  data_for_plot %>% 
+  update_tsibble(index = nday) %>% 
+  CCF(active, critical, lag.max =1) %>% 
+ccf_active_critivalautoplot()
+
+
+# active slove vs. critical slope: active-lag(active,1) vs. critical-lag(critical
+local({
+ccf_active_critival_new_cases <- 
+  data_for_plot %>% 
+  update_tsibble(index = nday) %>% 
+CCF(active-lag(active,1), critical-lag(critical,1)) 
+
+ccf_active_critival_new_cases %>% autoplot()
+
+ccf_active_critival_new_cases %>% 
+  update_tsibble(index = nday) %>% 
+  filter(abs(lag)<=14) %>% 
+  group_by(country) %>% 
+  filter(ccf == max(ccf) & abs(max(ccf))>=0.1) %>% 
+  arrange(desc(ccf)) %>% 
+  mutate(ccf = round(ccf,2))
+})
+
+
+# active r vs. critical r
+local({
+  ccf_active_critival <- 
+    data_for_plot %>% 
+    CCF(r_active, r_critical)
+  
+  ccf_active_critival %>% 
+    autoplot()
+  
+  ccf_active_critival %>% 
+    filter(abs(lag)<=14) %>% 
+    group_by(country) %>% 
+    filter(ccf == max(ccf) & abs(max(ccf))>=0.1
+           ) %>% 
+    arrange(desc(ccf)) %>% 
+    mutate(ccf = round(ccf,2))
+})
+
+
+
+
+#  cdf by  optimal lag
+local({
+    data_for_plot %>% 
+    CCF(r_active, r_critical) %>% 
+    filter(lag == -7) %>% 
+    arrange(desc(ccf)) %>% 
+    mutate(ccf = round(ccf,2))
+})
+
+
+
+# max lag  = -2 ==> active precedes critical by 2.
+# tibble(
+#   day = 1:9,
+#   active = c( 0,  1, 2,3,-4,-5,6,NA,NA),
+#   critcal = c(NA, NA,0,1, 2, 3,-4,-5,6)
+# ) %>%
+#   as_tsibble(index = day) %>%
+#   CCF(active,critcal) %>% 
+#   arrange(desc(ccf))
+
 
 ```
 
 
+# r_active & r_critical vs time
+```{r}
+  data_for_plot %>% 
+  ggplot(aes(x = nday)) +
+  geom_line(aes(y = r_critical, color = "critical")) +
+  geom_line(aes(y = r_active, color = "active")) +
+  # ylab("active & critical (log scale")+
+  ggtitle("active rate & critical rate (red) vs. time")+
+  ylim(0,2)+
+  # guides(color=guide_legend(title="patient type - red - critical, green - active")) +
+  facet_wrap(~country, scales = "free")
+```
 
-# find best autocor
-```{r fig.width=6, fig.height=2}
+
+# % active vs. time
+```{r, fig.width=4, fig.height=2}
+
+OPT_ACTIVE_CRITICAL_LAG <- -7
+
+z <- 
+  data_for_plot %>% 
+  mutate(r_active_lead_opt = lead(active, -OPT_ACTIVE_CRITICAL_LAG)) 
+
+z %>%    
+  CCF(r_active, r_critical) %>% 
+  filter(country == "Italy") %>% 
+  filter(abs(lag)<=14)
+
+z %>%    
+  CCF(r_active_lead_opt, r_critical,lag_max = 1) %>% 
+  filter(country == "Italy") %>% 
+  filter(lag == 0)
+  
+ggplot(aes(x = nday)) +
+  geom_line(aes(y = r_critical, color = "critical")) +
+  geom_line(aes(y = r_active, color = "active")) +
+  # ylab("active & critical (log scale")+
+  ggtitle("active rate & critical rate (red) vs. time")+
+  ylim(0,2)+
+  # guides(color=guide_legend(title="patient type - red - critical, green - active")) +
+  facet_wrap(~country, scales = "free")
+  
 
 
-countries_of_interest %>% 
-  map(function(country){
-    tf %>% 
-      filter(country == country) %>% 
-      {ccf(.$critical, .$confirmed, lag.max=21,  type = c("correlation"), plot=TRUE, main="country: critical vs. confirmed")}
-  })
 
 ```
 
 ```{r fig.width=6, fig.height=2}
 
 
-countries_of_interest %>% 
-  map(function(country){
-    tf %>% 
-      filter(country == country) %>% 
-      {ccf(.$critical, .$confirmed, lag.max=21,  type = c("correlation"), main="country: critical vs. confirmed")}
   })
 
 ```
